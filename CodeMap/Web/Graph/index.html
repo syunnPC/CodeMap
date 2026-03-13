@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CodeMap グラフ</title>
+  <link rel="stylesheet" href="./styles.css?v=20260312g" />
+</head>
+<body>
+  <main class="app-shell">
+    <section id="workspace" class="workspace">
+      <div id="graph" class="graph-canvas" role="region" aria-label="依存関係グラフ"></div>
+      <div id="nodeHoverCard" class="node-hover-card" hidden></div>
+      <div id="edgeHoverCard" class="node-hover-card edge-hover-card" hidden></div>
+      <div id="panelSplitter" class="panel-splitter" role="separator" aria-orientation="vertical" tabindex="0"></div>
+      <div id="mobilePanelSplitter" class="mobile-panel-splitter" role="separator" aria-orientation="horizontal" tabindex="0"></div>
+      <aside id="sidePanel" class="panel side-panel" role="complementary" data-i18n-aria-label="panel.controls">
+        <section class="panel-group">
+          <h2 data-i18n="panel.display"></h2>
+          <div class="controls">
+            <label class="toggle-row">
+              <input id="showProjectsToggle" type="checkbox" checked data-i18n-aria-label="toggle.projects" />
+              <span data-i18n="toggle.projects"></span>
+            </label>
+            <label class="toggle-row">
+              <input id="showDocumentsToggle" type="checkbox" checked data-i18n-aria-label="toggle.documents" />
+              <span data-i18n="toggle.documents"></span>
+            </label>
+            <label class="toggle-row">
+              <input id="showPackagesToggle" type="checkbox" checked data-i18n-aria-label="toggle.packages" />
+              <span data-i18n="toggle.packages"></span>
+            </label>
+            <label class="toggle-row">
+              <input id="showSymbolsToggle" type="checkbox" data-i18n-aria-label="toggle.symbols" />
+              <span data-i18n="toggle.symbols"></span>
+            </label>
+            <label class="toggle-row">
+              <input id="showAssembliesToggle" type="checkbox" checked data-i18n-aria-label="toggle.assemblies" />
+              <span data-i18n="toggle.assemblies"></span>
+            </label>
+            <label class="toggle-row">
+              <input id="showNativeDependenciesToggle" type="checkbox" checked data-i18n-aria-label="toggle.nativeDependencies" />
+              <span data-i18n="toggle.nativeDependencies"></span>
+            </label>
+            <label class="toggle-row">
+              <input id="showDocumentDependenciesToggle" type="checkbox" checked data-i18n-aria-label="toggle.documentDependencies" />
+              <span data-i18n="toggle.documentDependencies"></span>
+            </label>
+            <label class="toggle-row">
+              <input id="showSymbolDependenciesToggle" type="checkbox" checked data-i18n-aria-label="toggle.symbolDependencies" />
+              <span data-i18n="toggle.symbolDependencies"></span>
+            </label>
+            <label class="toggle-row">
+              <input id="dependencyMapModeToggle" type="checkbox" data-i18n-aria-label="toggle.dependencyMapMode" />
+              <span data-i18n="toggle.dependencyMapMode"></span>
+            </label>
+            <label class="toggle-row">
+              <input id="impactAnalysisModeToggle" type="checkbox" data-i18n-aria-label="toggle.impactAnalysisMode" />
+              <span data-i18n="toggle.impactAnalysisMode"></span>
+            </label>
+            <label class="toggle-row">
+              <input id="showCyclesOnlyToggle" type="checkbox" data-i18n-aria-label="toggle.showCyclesOnly" />
+              <span data-i18n="toggle.showCyclesOnly"></span>
+            </label>
+            <label class="select-row">
+              <span data-i18n="dependencyMap.direction.label"></span>
+              <select id="dependencyMapDirectionSelect" data-i18n-aria-label="dependencyMap.direction.label">
+                <option value="both" data-i18n="dependencyMap.direction.both"></option>
+                <option value="outgoing" data-i18n="dependencyMap.direction.outgoing"></option>
+                <option value="incoming" data-i18n="dependencyMap.direction.incoming"></option>
+              </select>
+            </label>
+            <button id="fitButton" type="button" data-i18n="button.fit" data-i18n-aria-label="button.fit"></button>
+            <button id="layoutButton" type="button" data-i18n="button.layout" data-i18n-aria-label="button.layout"></button>
+            <button id="pinSelectedButton" type="button" data-i18n="button.pinSelected" data-i18n-aria-label="button.pinSelected"></button>
+            <button id="unpinAllButton" type="button" data-i18n="button.unpinAll" data-i18n-aria-label="button.unpinAll"></button>
+            <button id="hideSelectedButton" type="button" data-i18n="button.hideSelected" data-i18n-aria-label="button.hideSelected"></button>
+            <button id="exportViewButton" type="button" data-i18n="button.exportView" data-i18n-aria-label="button.exportView"></button>
+            <button id="importViewButton" type="button" data-i18n="button.importView" data-i18n-aria-label="button.importView"></button>
+            <button id="copyShareButton" type="button" data-i18n="button.copyShare" data-i18n-aria-label="button.copyShare"></button>
+            <input id="importViewInput" type="file" accept="application/json,.json" hidden />
+          </div>
+        </section>
+
+        <section class="panel-group">
+          <h2 data-i18n="panel.symbolTypes"></h2>
+          <div id="symbolTypeFilters" class="symbol-type-filters" role="group" data-i18n-aria-label="panel.symbolTypes"></div>
+        </section>
+
+        <section class="panel-group">
+          <h2 data-i18n="panel.legend"></h2>
+          <div class="legend-grid">
+            <section class="legend-card">
+              <div class="legend-card-title" data-i18n="legend.section.nodes"></div>
+              <div class="legend-list">
+                <div class="legend-item"><span class="swatch project"></span> <span data-i18n="legend.project"></span></div>
+                <div class="legend-item"><span class="swatch document"></span> <span data-i18n="legend.document"></span></div>
+                <div class="legend-item"><span class="swatch symbol"></span> <span data-i18n="legend.symbol"></span></div>
+                <div class="legend-item"><span class="swatch package"></span> <span data-i18n="legend.package"></span></div>
+                <div class="legend-item"><span class="swatch assembly"></span> <span data-i18n="legend.assembly"></span></div>
+                <div class="legend-item"><span class="swatch dll"></span> <span data-i18n="legend.dll"></span></div>
+              </div>
+            </section>
+            <section class="legend-card">
+              <div class="legend-card-title" data-i18n="legend.section.references"></div>
+              <div class="legend-list">
+                <div class="legend-item"><span class="swatch project-dependency"></span> <span data-i18n="legend.projectDependency"></span></div>
+                <div class="legend-item"><span class="swatch external-dependency"></span> <span data-i18n="legend.externalDependency"></span></div>
+                <div class="legend-item"><span class="swatch document-dependency"></span> <span data-i18n="legend.documentDependency"></span></div>
+                <div class="legend-item"><span class="swatch symbol-dependency"></span> <span data-i18n="legend.symbolDependency"></span></div>
+                <div class="legend-item"><span class="swatch call-dependency"></span> <span data-i18n="legend.callDependency"></span></div>
+                <div class="legend-item"><span class="swatch inheritance-dependency"></span> <span data-i18n="legend.inheritanceDependency"></span></div>
+                <div class="legend-item"><span class="swatch cycle-dependency"></span> <span data-i18n="legend.cycleDependency"></span></div>
+              </div>
+            </section>
+          </div>
+          <div class="legend-note">
+            <span class="legend-note-label" data-i18n="legend.hintLabel"></span>
+            <span data-i18n="legend.note"></span>
+          </div>
+          <div class="legend-note legend-note-secondary" data-i18n="legend.hoverHint"></div>
+        </section>
+
+        <section class="panel-group inspector-group">
+          <h2 data-i18n="panel.inspector"></h2>
+          <div id="nodeInspector" class="inspector-body" role="region" aria-live="polite" data-i18n-aria-label="panel.inspector"></div>
+        </section>
+      </aside>
+    </section>
+  </main>
+
+  <script src="../third_party/cytoscape/cytoscape.min.js"></script>
+  <script src="./graph-app.js?v=20260313a"></script>
+</body>
+</html>

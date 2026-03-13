@@ -1,0 +1,54 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ClangSharp.Interop" Version="21.1.8.2" />
+    <PackageReference Include="Microsoft.Build.Locator" Version="1.10.2" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.0.0" />
+    <PackageReference Include="Microsoft.CodeAnalysis.Workspaces.MSBuild" Version="5.0.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.10" />
+    <PackageReference Include="xunit" Version="2.9.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="coverlet.collector" Version="6.0.2">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\CodeMap\Analysis\AnalysisPathFilter.cs" Link="CodeMap\Analysis\AnalysisPathFilter.cs" />
+    <Compile Include="..\CodeMap\Analysis\AnalysisProgressUpdate.cs" Link="CodeMap\Analysis\AnalysisProgressUpdate.cs" />
+    <Compile Include="..\CodeMap\Analysis\AnalysisUtilities.cs" Link="CodeMap\Analysis\AnalysisUtilities.cs" />
+    <Compile Include="..\CodeMap\Analysis\CppAnalysisService.cs" Link="CodeMap\Analysis\CppAnalysisService.cs" />
+    <Compile Include="..\CodeMap\Analysis\LibClangTranslationUnitProbe.cs" Link="CodeMap\Analysis\LibClangTranslationUnitProbe.cs" />
+    <Compile Include="..\CodeMap\Analysis\RoslynAnalysisService.cs" Link="CodeMap\Analysis\RoslynAnalysisService.cs" />
+    <Compile Include="..\CodeMap\Analysis\SolutionAnalysisSnapshot.cs" Link="CodeMap\Analysis\SolutionAnalysisSnapshot.cs" />
+    <Compile Include="..\CodeMap\AppLocalization.cs" Link="CodeMap\AppLocalization.cs" />
+    <Compile Include="..\CodeMap\AppLaunchOptions.cs" Link="CodeMap\AppLaunchOptions.cs" />
+    <Compile Include="..\CodeMap\AppPreferences.cs" Link="CodeMap\AppPreferences.cs" />
+    <Compile Include="..\CodeMap\Storage\SnapshotPersistenceResult.cs" Link="CodeMap\Storage\SnapshotPersistenceResult.cs" />
+    <Compile Include="..\CodeMap\Storage\SqliteSnapshotStore.cs" Link="CodeMap\Storage\SqliteSnapshotStore.cs" />
+    <Compile Include="..\CodeMap\AppThemePreference.cs" Link="CodeMap\AppThemePreference.cs" />
+    <Compile Include="..\CodeMap\CodeMapJsonSerializerContext.cs" Link="CodeMap\CodeMapJsonSerializerContext.cs" />
+    <Compile Include="..\CodeMap\Diagnostics\AsyncFileLogger.cs" Link="CodeMap\Diagnostics\AsyncFileLogger.cs" />
+    <Compile Include="..\CodeMap\Graph\GraphMessages.cs" Link="CodeMap\Graph\GraphMessages.cs" />
+    <Compile Include="..\CodeMap\Graph\GraphPayload.cs" Link="CodeMap\Graph\GraphPayload.cs" />
+    <Compile Include="..\CodeMap\Graph\GraphPayloadBuilder.cs" Link="CodeMap\Graph\GraphPayloadBuilder.cs" />
+    <Compile Include="..\CodeMap\MainWindow.ViewStatePersistence.cs" Link="CodeMap\MainWindow.ViewStatePersistence.cs" />
+    <Compile Include="..\CodeMap\Services\NavigationHistoryService.cs" Link="CodeMap\Services\NavigationHistoryService.cs" />
+    <Compile Include="..\CodeMap\ViewModels\ViewStateModels.cs" Link="CodeMap\ViewModels\ViewStateModels.cs" />
+    <Compile Include="..\CodeMap\ViewModels\SymbolListItem.cs" Link="CodeMap\ViewModels\SymbolListItem.cs" />
+    <Compile Include="..\CodeMap\ViewModels\WorkspaceTreeItem.cs" Link="CodeMap\ViewModels\WorkspaceTreeItem.cs" />
+    <Compile Include="..\CodeMap\AppStoragePaths.cs" Link="CodeMap\AppStoragePaths.cs" />
+  </ItemGroup>
+</Project>

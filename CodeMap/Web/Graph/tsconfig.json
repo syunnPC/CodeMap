@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "none",
+    "strict": true,
+    "removeComments": false,
+    "outFile": "./graph-app.js",
+    "skipLibCheck": true
+  },
+  "files": [
+    "./graph-app.ts",
+    "./graph-layout.ts"
+  ]
+}
