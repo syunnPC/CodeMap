@@ -199,14 +199,19 @@ public sealed partial class MainWindow
     private const string SuccessIconGlyph = "\uE73E";
     private const string InfoIconGlyph = "\uE946";
 
+    private static readonly Microsoft.UI.Color ErrorFallbackColor = Microsoft.UI.ColorHelper.FromArgb(255, 205, 76, 89);
+    private static readonly Microsoft.UI.Color WarningFallbackColor = Microsoft.UI.ColorHelper.FromArgb(255, 214, 171, 45);
+    private static readonly Microsoft.UI.Color SuccessFallbackColor = Microsoft.UI.ColorHelper.FromArgb(255, 72, 163, 102);
+    private static readonly Microsoft.UI.Color NeutralFallbackColor = Microsoft.UI.ColorHelper.FromArgb(255, 142, 142, 142);
+
     private void UpdateStatusIcon(StatusSeverity severity)
     {
         (string glyph, string brushKey, Microsoft.UI.Color fallbackColor) = severity switch
         {
-            StatusSeverity.Error => (ErrorIconGlyph, "SystemFillColorCriticalBrush", Microsoft.UI.ColorHelper.FromArgb(255, 205, 76, 89)),
-            StatusSeverity.Warning => (WarningIconGlyph, "SystemFillColorCautionBrush", Microsoft.UI.ColorHelper.FromArgb(255, 214, 171, 45)),
-            StatusSeverity.Success => (SuccessIconGlyph, "SystemFillColorSuccessBrush", Microsoft.UI.ColorHelper.FromArgb(255, 72, 163, 102)),
-            _ => (InfoIconGlyph, "SystemFillColorNeutralBrush", Microsoft.UI.ColorHelper.FromArgb(255, 142, 142, 142)),
+            StatusSeverity.Error => (ErrorIconGlyph, "SystemFillColorCriticalBrush", ErrorFallbackColor),
+            StatusSeverity.Warning => (WarningIconGlyph, "SystemFillColorCautionBrush", WarningFallbackColor),
+            StatusSeverity.Success => (SuccessIconGlyph, "SystemFillColorSuccessBrush", SuccessFallbackColor),
+            _ => (InfoIconGlyph, "SystemFillColorNeutralBrush", NeutralFallbackColor),
         };
 
         StatusIcon.Glyph = glyph;
