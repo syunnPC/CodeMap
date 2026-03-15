@@ -21,6 +21,9 @@ namespace CodeMap;
 
 public sealed partial class MainWindow
 {
+    private static readonly Microsoft.UI.Color SecondaryTextFallbackColor =
+        Microsoft.UI.ColorHelper.FromArgb(255, 160, 160, 160);
+
     private async void OnShowSettingsClicked(object sender, RoutedEventArgs e)
     {
         ContentDialog dialog = new()
@@ -145,7 +148,7 @@ public sealed partial class MainWindow
                 TextWrapping = TextWrapping.Wrap,
                 Foreground = GetThemeBrush(
                     "TextFillColorSecondaryBrush",
-                    Microsoft.UI.ColorHelper.FromArgb(255, 160, 160, 160))
+                    SecondaryTextFallbackColor)
             });
             return section;
         }
@@ -165,7 +168,7 @@ public sealed partial class MainWindow
                 TextWrapping = TextWrapping.Wrap,
                 Foreground = GetThemeBrush(
                     "TextFillColorSecondaryBrush",
-                    Microsoft.UI.ColorHelper.FromArgb(255, 160, 160, 160))
+                    SecondaryTextFallbackColor)
             });
             return section;
         }
@@ -236,7 +239,7 @@ public sealed partial class MainWindow
             TextWrapping = TextWrapping.WrapWholeWords,
             Foreground = GetThemeBrush(
                 "TextFillColorSecondaryBrush",
-                Microsoft.UI.ColorHelper.FromArgb(255, 160, 160, 160))
+                SecondaryTextFallbackColor)
         });
 
         Button clearAllButton = new()
@@ -311,7 +314,7 @@ public sealed partial class MainWindow
             VerticalAlignment = VerticalAlignment.Center,
             Foreground = GetThemeBrush(
                 "TextFillColorSecondaryBrush",
-                Microsoft.UI.ColorHelper.FromArgb(255, 160, 160, 160))
+                SecondaryTextFallbackColor)
         });
 
         if (valueElement is FrameworkElement frameworkElement)
