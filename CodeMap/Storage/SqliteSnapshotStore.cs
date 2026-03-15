@@ -2241,7 +2241,7 @@ public sealed class SqliteSnapshotStore : IDisposable
         {
             candidate = Path.GetFullPath(candidate);
         }
-        catch
+        catch (ArgumentException)
         {
             return OperatingSystem.IsWindows()
                 ? candidate.ToUpperInvariant()

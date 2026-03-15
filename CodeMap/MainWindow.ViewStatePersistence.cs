@@ -89,7 +89,7 @@ public sealed partial class MainWindow
             return;
         }
 
-        bool hiddenNodesChanged = !HiddenNodesEqual(activeState.Graph.HiddenNodes, normalizedState.HiddenNodes);
+        bool hiddenNodesChanged = !ViewStateComparer.ReadOnlyListEqual(activeState.Graph.HiddenNodes, normalizedState.HiddenNodes);
         activeState.Graph = normalizedState;
         SaveSolutionViewStates();
         if (hiddenNodesChanged)
@@ -233,33 +233,8 @@ public sealed partial class MainWindow
             left.PanelWidth == right.PanelWidth &&
             left.MobilePanelHeight == right.MobilePanelHeight &&
             string.Equals(left.DependencyMapDirection, right.DependencyMapDirection, StringComparison.OrdinalIgnoreCase) &&
-            PinnedNodesEqual(left.PinnedNodes, right.PinnedNodes) &&
-            HiddenNodesEqual(left.HiddenNodes, right.HiddenNodes);
-    }
-
-    private static bool PinnedNodesEqual(
-        IReadOnlyList<PinnedNodeViewState>? left,
-        IReadOnlyList<PinnedNodeViewState>? right)
-    {
-        if (ReferenceEquals(left, right))
-        {
-            return true;
-        }
-
-        if (left is null || right is null || left.Count != right.Count)
-        {
-            return false;
-        }
-
-        for (int index = 0; index < left.Count; index++)
-        {
-            if (left[index] != right[index])
-            {
-                return false;
-            }
-        }
-
-        return true;
+            ViewStateComparer.ReadOnlyListEqual(left.PinnedNodes, right.PinnedNodes) &&
+            ViewStateComparer.ReadOnlyListEqual(left.HiddenNodes, right.HiddenNodes);
     }
 
     private static IReadOnlyList<PinnedNodeViewState> NormalizePinnedNodes(IReadOnlyList<PinnedNodeViewState>? pinnedNodes)
@@ -322,31 +297,6 @@ public sealed partial class MainWindow
             .OrderBy(item => item.Label, StringComparer.OrdinalIgnoreCase)
             .ThenBy(item => item.NodeId, StringComparer.Ordinal)
             .ToArray();
-    }
-
-    private static bool HiddenNodesEqual(
-        IReadOnlyList<HiddenNodeViewState>? left,
-        IReadOnlyList<HiddenNodeViewState>? right)
-    {
-        if (ReferenceEquals(left, right))
-        {
-            return true;
-        }
-
-        if (left is null || right is null || left.Count != right.Count)
-        {
-            return false;
-        }
-
-        for (int index = 0; index < left.Count; index++)
-        {
-            if (left[index] != right[index])
-            {
-                return false;
-            }
-        }
-
-        return true;
     }
 
     private static string NormalizeDependencyMapDirection(string? direction)

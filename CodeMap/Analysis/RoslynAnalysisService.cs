@@ -248,10 +248,7 @@ public sealed class RoslynAnalysisService
                         documentId,
                         cancellationToken);
 
-                    foreach (SymbolReferenceObservation reference in references)
-                    {
-                        referenceObservations.Add(reference);
-                    }
+                    referenceObservations.AddRange(references);
 
                     IReadOnlyList<NativeDependencyObservation> nativeDependencies = ExtractManagedNativeDependencies(
                         root,
@@ -259,10 +256,7 @@ public sealed class RoslynAnalysisService
                         documentId,
                         declaredSymbolsInDocument,
                         cancellationToken);
-                    foreach (NativeDependencyObservation nativeDependency in nativeDependencies)
-                    {
-                        nativeDependencyObservations.Add(nativeDependency);
-                    }
+                    nativeDependencyObservations.AddRange(nativeDependencies);
                 }
                 else
                 {
@@ -270,10 +264,7 @@ public sealed class RoslynAnalysisService
                 }
             }
 
-            foreach (DeclaredSymbolEdgeAnchor declaration in declaredSymbolsInDocument)
-            {
-                declaredSymbols.Add(declaration);
-            }
+            declaredSymbols.AddRange(declaredSymbolsInDocument);
 
             documentSummaries.Add(new DocumentAnalysisSummary(
                 documentId,
@@ -369,25 +360,14 @@ public sealed class RoslynAnalysisService
                 declaredSymbolsInDocument,
                 cancellationToken);
 
-            foreach (DeclaredSymbolEdgeAnchor declaration in declaredSymbolsInDocument)
-            {
-                declaredSymbols.Add(declaration);
-            }
-
-            foreach (SymbolReferenceObservation reference in ExtractReferenceObservations(root, semanticModel, documentId, cancellationToken))
-            {
-                referenceObservations.Add(reference);
-            }
-
-            foreach (NativeDependencyObservation nativeDependency in ExtractManagedNativeDependencies(
+            declaredSymbols.AddRange(declaredSymbolsInDocument);
+            referenceObservations.AddRange(ExtractReferenceObservations(root, semanticModel, documentId, cancellationToken));
+            nativeDependencyObservations.AddRange(ExtractManagedNativeDependencies(
                 root,
                 semanticModel,
                 documentId,
                 declaredSymbolsInDocument,
-                cancellationToken))
-            {
-                nativeDependencyObservations.Add(nativeDependency);
-            }
+                cancellationToken));
 
             documentSummaries.Add(new DocumentAnalysisSummary(
                 documentId,
