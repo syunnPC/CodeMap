@@ -100,3 +100,30 @@ internal sealed record WorkspaceTreeNodeContent(
         return Text;
     }
 }
+
+internal static class ViewStateComparer
+{
+    public static bool ReadOnlyListEqual<T>(IReadOnlyList<T>? left, IReadOnlyList<T>? right)
+        where T : IEquatable<T>
+    {
+        if (ReferenceEquals(left, right))
+        {
+            return true;
+        }
+
+        if (left is null || right is null || left.Count != right.Count)
+        {
+            return false;
+        }
+
+        for (int index = 0; index < left.Count; index++)
+        {
+            if (!left[index].Equals(right[index]))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+}

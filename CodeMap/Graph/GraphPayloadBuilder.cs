@@ -3,7 +3,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Security.Cryptography;
 using System.Text;
 
 namespace CodeMap.Graph;
@@ -450,11 +449,7 @@ public static class GraphPayloadBuilder
         return builder.ToString();
     }
 
-    private static string ComputeHashToken(string value)
-    {
-        byte[] hashBytes = SHA256.HashData(Encoding.UTF8.GetBytes(value));
-        return Convert.ToHexString(hashBytes.AsSpan(0, 4)).ToLowerInvariant();
-    }
+    private static string ComputeHashToken(string value) => AnalysisIdBuilder.ComputeHashToken(value);
 
     private static string BuildNativeDependencyLabel(NativeDependencySummary dependency)
     {
@@ -526,16 +521,5 @@ public static class GraphPayloadBuilder
         };
     }
 
-    private static string? NormalizeSampleSnippet(string? sampleSnippet)
-    {
-        if (string.IsNullOrWhiteSpace(sampleSnippet))
-        {
-            return null;
-        }
-
-        string trimmed = sampleSnippet.Trim();
-        return trimmed.Length <= 180
-            ? trimmed
-            : $"{trimmed[..177]}...";
-    }
+    private static string? NormalizeSampleSnippet(string? sampleSnippet) => DependencySampleHelper.NormalizeSnippet(sampleSnippet);
 }

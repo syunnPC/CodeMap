@@ -5,6 +5,15 @@ using CodeMap;
 
 public sealed class SymbolListItem
 {
+    private const string ClassGlyph = "\uE943";
+    private const string StructGlyph = "\uEA86";
+    private const string InterfaceGlyph = "\uE8AB";
+    private const string EnumGlyph = "\uE8EF";
+    private const string MethodGlyph = "\uE7C1";
+    private const string ConstructorGlyph = "\uE710";
+    private const string FieldGlyph = "\uE71A";
+    private const string DefaultGlyph = "\uE946";
+
     public SymbolListItem(
         string symbolId,
         string projectName,
@@ -43,21 +52,21 @@ public sealed class SymbolListItem
 
     public string IconGlyph => Kind switch
     {
-        "ClassDeclaration" => "\uE943",
-        "StructDeclaration" => "\uEA86",
-        "InterfaceDeclaration" => "\uE8AB",
-        "EnumDeclaration" => "\uE8EF",
-        "UnionDeclaration" => "\uEA86",
-        "MethodDeclaration" => "\uE7C1",
-        "FunctionDeclaration" => "\uE7C1",
-        "ConstructorDeclaration" => "\uE710",
-        "PropertyDeclaration" => "\uE7C1",
-        "FieldDeclaration" => "\uE71A",
-        "EventDeclaration" => "\uEA86",
-        "DelegateDeclaration" => "\uE8AB",
-        "TypeAliasDeclaration" => "\uE8AB",
-        "MacroDefinition" => "\uE71A",
-        _ => "\uE946"
+        "ClassDeclaration" => ClassGlyph,
+        "StructDeclaration" => StructGlyph,
+        "InterfaceDeclaration" => InterfaceGlyph,
+        "EnumDeclaration" => EnumGlyph,
+        "UnionDeclaration" => StructGlyph,
+        "MethodDeclaration" => MethodGlyph,
+        "FunctionDeclaration" => MethodGlyph,
+        "ConstructorDeclaration" => ConstructorGlyph,
+        "PropertyDeclaration" => MethodGlyph,
+        "FieldDeclaration" => FieldGlyph,
+        "EventDeclaration" => StructGlyph,
+        "DelegateDeclaration" => InterfaceGlyph,
+        "TypeAliasDeclaration" => InterfaceGlyph,
+        "MacroDefinition" => FieldGlyph,
+        _ => DefaultGlyph
     };
 
     public bool MatchesQuery(string query)

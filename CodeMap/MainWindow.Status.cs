@@ -194,36 +194,28 @@ public sealed partial class MainWindow
         return ResolveStatusDefinition(statusCode).Severity;
     }
 
+    private const string ErrorIconGlyph = "\uEA39";
+    private const string WarningIconGlyph = "\uE895";
+    private const string SuccessIconGlyph = "\uE73E";
+    private const string InfoIconGlyph = "\uE946";
+
+    private static readonly Windows.UI.Color ErrorFallbackColor = Microsoft.UI.ColorHelper.FromArgb(255, 205, 76, 89);
+    private static readonly Windows.UI.Color WarningFallbackColor = Microsoft.UI.ColorHelper.FromArgb(255, 214, 171, 45);
+    private static readonly Windows.UI.Color SuccessFallbackColor = Microsoft.UI.ColorHelper.FromArgb(255, 72, 163, 102);
+    private static readonly Windows.UI.Color NeutralFallbackColor = Microsoft.UI.ColorHelper.FromArgb(255, 142, 142, 142);
+
     private void UpdateStatusIcon(StatusSeverity severity)
     {
-        if (severity == StatusSeverity.Error)
+        (string glyph, string brushKey, Windows.UI.Color fallbackColor) = severity switch
         {
-            StatusIcon.Glyph = "\uEA39";
-            StatusIcon.Foreground = GetThemeBrush(
-                "SystemFillColorCriticalBrush",
-                Microsoft.UI.ColorHelper.FromArgb(255, 205, 76, 89));
-        }
-        else if (severity == StatusSeverity.Warning)
-        {
-            StatusIcon.Glyph = "\uE895";
-            StatusIcon.Foreground = GetThemeBrush(
-                "SystemFillColorCautionBrush",
-                Microsoft.UI.ColorHelper.FromArgb(255, 214, 171, 45));
-        }
-        else if (severity == StatusSeverity.Success)
-        {
-            StatusIcon.Glyph = "\uE73E";
-            StatusIcon.Foreground = GetThemeBrush(
-                "SystemFillColorSuccessBrush",
-                Microsoft.UI.ColorHelper.FromArgb(255, 72, 163, 102));
-        }
-        else
-        {
-            StatusIcon.Glyph = "\uE946";
-            StatusIcon.Foreground = GetThemeBrush(
-                "SystemFillColorNeutralBrush",
-                Microsoft.UI.ColorHelper.FromArgb(255, 142, 142, 142));
-        }
+            StatusSeverity.Error => (ErrorIconGlyph, "SystemFillColorCriticalBrush", ErrorFallbackColor),
+            StatusSeverity.Warning => (WarningIconGlyph, "SystemFillColorCautionBrush", WarningFallbackColor),
+            StatusSeverity.Success => (SuccessIconGlyph, "SystemFillColorSuccessBrush", SuccessFallbackColor),
+            _ => (InfoIconGlyph, "SystemFillColorNeutralBrush", NeutralFallbackColor),
+        };
+
+        StatusIcon.Glyph = glyph;
+        StatusIcon.Foreground = GetThemeBrush(brushKey, fallbackColor);
     }
 
     private static StatusDefinition ResolveStatusDefinition(StatusCode statusCode)

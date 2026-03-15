@@ -982,7 +982,7 @@ public sealed class CppAnalysisService
             {
                 normalizedPath = Path.GetFullPath(candidate);
             }
-            catch
+            catch (ArgumentException)
             {
                 continue;
             }
@@ -1010,7 +1010,7 @@ public sealed class CppAnalysisService
         {
             return Path.GetFullPath(candidate);
         }
-        catch
+        catch //Argument, ArgumentNull, PathTooLong, Security, NotSupported Exceptions
         {
             return fallbackDirectory;
         }
@@ -1676,7 +1676,7 @@ public sealed class CppAnalysisService
             normalizedPath = Path.GetFullPath(value);
             return true;
         }
-        catch
+        catch (ArgumentException)
         {
             return false;
         }
@@ -3585,7 +3585,7 @@ public sealed class CppAnalysisService
                 ? Path.GetFullPath(value)
                 : Path.GetFullPath(Path.Combine(baseDirectory, value));
         }
-        catch
+        catch (ArgumentException)
         {
             return null;
         }
@@ -3850,7 +3850,7 @@ public sealed class CppAnalysisService
             {
                 subDirectories = Directory.EnumerateDirectories(currentDirectory);
             }
-            catch
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
                 continue;
             }
@@ -3871,7 +3871,7 @@ public sealed class CppAnalysisService
             {
                 currentFiles = Directory.EnumerateFiles(currentDirectory);
             }
-            catch
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
             {
                 continue;
             }
@@ -4471,7 +4471,7 @@ public sealed class CppAnalysisService
 
                 return fullPath;
             }
-            catch
+            catch (ArgumentException)
             {
                 return normalizedValue;
             }

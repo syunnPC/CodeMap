@@ -158,31 +158,6 @@ internal sealed class NavigationHistoryService
             left.IsImpactAnalysisMode == right.IsImpactAnalysisMode &&
             left.ShowCyclesOnly == right.ShowCyclesOnly &&
             string.Equals(left.DependencyMapDirection, right.DependencyMapDirection, StringComparison.OrdinalIgnoreCase) &&
-            HiddenNodesEqual(left.HiddenNodes, right.HiddenNodes);
-    }
-
-    private static bool HiddenNodesEqual(
-        IReadOnlyList<HiddenNodeViewState>? left,
-        IReadOnlyList<HiddenNodeViewState>? right)
-    {
-        if (ReferenceEquals(left, right))
-        {
-            return true;
-        }
-
-        if (left is null || right is null || left.Count != right.Count)
-        {
-            return false;
-        }
-
-        for (int index = 0; index < left.Count; index++)
-        {
-            if (left[index] != right[index])
-            {
-                return false;
-            }
-        }
-
-        return true;
+            ViewStateComparer.ReadOnlyListEqual(left.HiddenNodes, right.HiddenNodes);
     }
 }
