@@ -1010,7 +1010,7 @@ public sealed class CppAnalysisService
         {
             return Path.GetFullPath(candidate);
         }
-        catch (ArgumentException)
+        catch //Argument, ArgumentNull, PathTooLong, Security, NotSupported Exceptions
         {
             return fallbackDirectory;
         }
