@@ -3782,21 +3782,16 @@ function layoutExternalDependencyStrip(nodes, metrics) {
         }
     }
 }
-function separateOverlappingExternalDependencyNodes() {
+function separateOverlappingNodes(options) {
     if (!state.cy) {
         return;
     }
-    const externalNodes = state.cy
-        .nodes()
-        .not(".state-hidden")
-        .not(".filtered-out")
-        .not(".pinned")
-        .filter((node) => isExternalDependencyGroup(String(node.data("group") ?? "")));
-    if (externalNodes.length < 2) {
+    const targetNodes = options.nodes;
+    if (targetNodes.length < 2) {
         return;
     }
     const collisionGroups = new Map();
-    externalNodes.forEach((node) => {
+    targetNodes.forEach((node) => {
         const position = node.position();
         const x = Number(position.x ?? 0);
         const y = Number(position.y ?? 0);
@@ -3815,14 +3810,17 @@ function separateOverlappingExternalDependencyNodes() {
             continue;
         }
         hasCollisions = true;
-        const orderedNodes = group.sort(compareExternalDependencyNodes);
+        const orderedNodes = group.sort(options.comparator);
         const anchor = orderedNodes[0].position();
-        const rows = chunkPlacements(orderedNodes, 3);
+        const columnCount = options.resolveColumnCount(orderedNodes.length);
+        const rows = chunkPlacements(orderedNodes, columnCount);
         const rowOffset = (rows.length - 1) / 2;
+        const columnGap = typeof options.columnGap === "function" ? options.columnGap(orderedNodes.length) : options.columnGap;
+        const rowGap = typeof options.rowGap === "function" ? options.rowGap(orderedNodes.length) : options.rowGap;
         for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
             const row = rows[rowIndex];
-            const xPositions = buildCenteredAxisPositions(row.length, 172);
-            const y = Number(anchor.y ?? 0) + (rowIndex - rowOffset) * 70;
+            const xPositions = buildCenteredAxisPositions(row.length, columnGap);
+            const y = Number(anchor.y ?? 0) + (rowIndex - rowOffset) * rowGap;
             for (let columnIndex = 0; columnIndex < row.length; columnIndex += 1) {
                 positionNodePreservingLock(row[columnIndex], Number(anchor.x ?? 0) + xPositions[columnIndex], y);
             }
@@ -3832,114 +3830,45 @@ function separateOverlappingExternalDependencyNodes() {
     if (hasCollisions) {
         forceGraphRender();
     }
+}
+function separateOverlappingExternalDependencyNodes() {
+    if (!state.cy) {
+        return;
+    }
+    separateOverlappingNodes({
+        nodes: state.cy.nodes().not(".state-hidden").not(".filtered-out").not(".pinned")
+            .filter((node) => isExternalDependencyGroup(String(node.data("group") ?? ""))),
+        comparator: compareExternalDependencyNodes,
+        resolveColumnCount: () => 3,
+        columnGap: 172,
+        rowGap: 70,
+    });
 }
 function separateOverlappingCollapsedNodes() {
     if (!state.cy) {
         return;
     }
-    const movableNodes = state.cy
-        .nodes()
-        .not(".state-hidden")
-        .not(".filtered-out")
-        .not(".pinned")
-        .filter((node) => !isExternalDependencyGroup(String(node.data("group") ?? "")));
-    if (movableNodes.length < 2) {
-        return;
-    }
-    const collisionGroups = new Map();
-    movableNodes.forEach((node) => {
-        const position = node.position();
-        const x = Number(position.x ?? 0);
-        const y = Number(position.y ?? 0);
-        const key = `${Math.round(x)}:${Math.round(y)}`;
-        const group = collisionGroups.get(key);
-        if (group) {
-            group.push(node);
-            return;
-        }
-        collisionGroups.set(key, [node]);
+    separateOverlappingNodes({
+        nodes: state.cy.nodes().not(".state-hidden").not(".filtered-out").not(".pinned")
+            .filter((node) => !isExternalDependencyGroup(String(node.data("group") ?? ""))),
+        comparator: compareNodeLabels,
+        resolveColumnCount: (count) => Math.max(2, Math.min(16, Math.ceil(Math.sqrt(count)))),
+        columnGap: (count) => count >= 80 ? 94 : 128,
+        rowGap: (count) => count >= 80 ? 54 : 72,
     });
-    let hasCollisions = false;
-    state.cy.startBatch();
-    for (const group of collisionGroups.values()) {
-        if (group.length < 2) {
-            continue;
-        }
-        hasCollisions = true;
-        const orderedNodes = group.sort(compareNodeLabels);
-        const anchor = orderedNodes[0].position();
-        const columnCount = Math.max(2, Math.min(16, Math.ceil(Math.sqrt(orderedNodes.length))));
-        const rows = chunkPlacements(orderedNodes, columnCount);
-        const rowOffset = (rows.length - 1) / 2;
-        const columnGap = orderedNodes.length >= 80 ? 94 : 128;
-        const rowGap = orderedNodes.length >= 80 ? 54 : 72;
-        for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
-            const row = rows[rowIndex];
-            const xPositions = buildCenteredAxisPositions(row.length, columnGap);
-            const y = Number(anchor.y ?? 0) + (rowIndex - rowOffset) * rowGap;
-            for (let columnIndex = 0; columnIndex < row.length; columnIndex += 1) {
-                positionNodePreservingLock(row[columnIndex], Number(anchor.x ?? 0) + xPositions[columnIndex], y);
-            }
-        }
-    }
-    state.cy.endBatch();
-    if (hasCollisions) {
-        forceGraphRender();
-    }
 }
 function separateOverlappingDocumentNodes() {
     if (!state.cy) {
         return;
     }
-    const documentNodes = state.cy
-        .nodes()
-        .not(".state-hidden")
-        .not(".filtered-out")
-        .not(".pinned")
-        .filter((node) => String(node.data("group") ?? "") === "document");
-    if (documentNodes.length < 2) {
-        return;
-    }
-    const collisionGroups = new Map();
-    documentNodes.forEach((node) => {
-        const position = node.position();
-        const x = Number(position.x ?? 0);
-        const y = Number(position.y ?? 0);
-        const key = `${Math.round(x)}:${Math.round(y)}`;
-        const group = collisionGroups.get(key);
-        if (group) {
-            group.push(node);
-            return;
-        }
-        collisionGroups.set(key, [node]);
+    separateOverlappingNodes({
+        nodes: state.cy.nodes().not(".state-hidden").not(".filtered-out").not(".pinned")
+            .filter((node) => String(node.data("group") ?? "") === "document"),
+        comparator: compareNodeLabels,
+        resolveColumnCount: (count) => Math.max(2, Math.min(8, Math.ceil(Math.sqrt(count)))),
+        columnGap: 172,
+        rowGap: 66,
     });
-    let hasCollisions = false;
-    state.cy.startBatch();
-    for (const group of collisionGroups.values()) {
-        if (group.length < 2) {
-            continue;
-        }
-        hasCollisions = true;
-        const orderedNodes = group.sort(compareNodeLabels);
-        const anchor = orderedNodes[0].position();
-        const columnCount = Math.max(2, Math.min(8, Math.ceil(Math.sqrt(orderedNodes.length))));
-        const rows = chunkPlacements(orderedNodes, columnCount);
-        const rowOffset = (rows.length - 1) / 2;
-        const columnGap = 172;
-        const rowGap = 66;
-        for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
-            const row = rows[rowIndex];
-            const xPositions = buildCenteredAxisPositions(row.length, columnGap);
-            const y = Number(anchor.y ?? 0) + (rowIndex - rowOffset) * rowGap;
-            for (let columnIndex = 0; columnIndex < row.length; columnIndex += 1) {
-                positionNodePreservingLock(row[columnIndex], Number(anchor.x ?? 0) + xPositions[columnIndex], y);
-            }
-        }
-    }
-    state.cy.endBatch();
-    if (hasCollisions) {
-        forceGraphRender();
-    }
 }
 function separateOverlappingNodeCollisions() {
     separateOverlappingExternalDependencyNodes();

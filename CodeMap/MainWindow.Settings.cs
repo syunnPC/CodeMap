@@ -21,7 +21,7 @@ namespace CodeMap;
 
 public sealed partial class MainWindow
 {
-    private static readonly Microsoft.UI.Color SecondaryTextFallbackColor =
+    private static readonly Windows.UI.Color SecondaryTextFallbackColor =
         Microsoft.UI.ColorHelper.FromArgb(255, 160, 160, 160);
 
     private async void OnShowSettingsClicked(object sender, RoutedEventArgs e)
