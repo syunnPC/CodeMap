@@ -171,10 +171,10 @@ public sealed partial class MainWindow
             : "tree";
         double panelWidth = double.IsFinite(state.ExplorerPanelWidth)
             ? state.ExplorerPanelWidth
-            : 300;
+            : DefaultExplorerPanelWidth;
         double splitRatio = double.IsFinite(state.WorkspaceSplitRatio)
             ? state.WorkspaceSplitRatio
-            : 0.5;
+            : DefaultWorkspaceSplitRatio;
 
         return state with
         {

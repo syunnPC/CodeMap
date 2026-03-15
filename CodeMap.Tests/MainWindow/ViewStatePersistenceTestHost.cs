@@ -18,8 +18,8 @@ public sealed partial class MainWindow
     private bool _isApplyingPersistedViewState;
     private bool _isWorkspaceSplit;
     private bool _isWindowClosed;
-    private double _explorerPanelWidth = 300;
-    private double _workspaceSplitRatio = 0.5;
+    private double _explorerPanelWidth = DefaultExplorerPanelWidth;
+    private double _workspaceSplitRatio = DefaultWorkspaceSplitRatio;
     private string? _activeSolutionPath;
 
     private CancellationTokenSource? _recentSolutionsSaveCancellationTokenSource;
@@ -33,6 +33,8 @@ public sealed partial class MainWindow
     private const double MinExplorerPanelWidth = 240;
     private const double MinWorkspaceSplitRatio = 0.2;
     private const double MaxWorkspaceSplitRatio = 0.8;
+    private const int DefaultExplorerPanelWidth = 300;
+    private const double DefaultWorkspaceSplitRatio = 0.5;
     private const int DefaultGraphPanelWidth = 320;
     private const int MinGraphSidebarPanelWidth = 220;
     private const int MaxGraphSidebarPanelWidth = 640;

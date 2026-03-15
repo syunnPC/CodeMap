@@ -28,6 +28,7 @@
   <ItemGroup>
     <Compile Include="..\CodeMap\Analysis\AnalysisPathFilter.cs" Link="CodeMap\Analysis\AnalysisPathFilter.cs" />
     <Compile Include="..\CodeMap\Analysis\AnalysisProgressUpdate.cs" Link="CodeMap\Analysis\AnalysisProgressUpdate.cs" />
+    <Compile Include="..\CodeMap\Analysis\CppSourceTextStripper.cs" Link="CodeMap\Analysis\CppSourceTextStripper.cs" />
     <Compile Include="..\CodeMap\Analysis\AnalysisUtilities.cs" Link="CodeMap\Analysis\AnalysisUtilities.cs" />
     <Compile Include="..\CodeMap\Analysis\CppAnalysisService.cs" Link="CodeMap\Analysis\CppAnalysisService.cs" />
     <Compile Include="..\CodeMap\Analysis\LibClangTranslationUnitProbe.cs" Link="CodeMap\Analysis\LibClangTranslationUnitProbe.cs" />
@@ -37,6 +38,7 @@
     <Compile Include="..\CodeMap\AppLaunchOptions.cs" Link="CodeMap\AppLaunchOptions.cs" />
     <Compile Include="..\CodeMap\AppPreferences.cs" Link="CodeMap\AppPreferences.cs" />
     <Compile Include="..\CodeMap\Storage\SnapshotPersistenceResult.cs" Link="CodeMap\Storage\SnapshotPersistenceResult.cs" />
+    <Compile Include="..\CodeMap\Storage\SqliteSnapshotStore.Hydration.cs" Link="CodeMap\Storage\SqliteSnapshotStore.Hydration.cs" />
     <Compile Include="..\CodeMap\Storage\SqliteSnapshotStore.cs" Link="CodeMap\Storage\SqliteSnapshotStore.cs" />
     <Compile Include="..\CodeMap\AppThemePreference.cs" Link="CodeMap\AppThemePreference.cs" />
     <Compile Include="..\CodeMap\CodeMapJsonSerializerContext.cs" Link="CodeMap\CodeMapJsonSerializerContext.cs" />
@@ -50,5 +52,11 @@
     <Compile Include="..\CodeMap\ViewModels\SymbolListItem.cs" Link="CodeMap\ViewModels\SymbolListItem.cs" />
     <Compile Include="..\CodeMap\ViewModels\WorkspaceTreeItem.cs" Link="CodeMap\ViewModels\WorkspaceTreeItem.cs" />
     <Compile Include="..\CodeMap\AppStoragePaths.cs" Link="CodeMap\AppStoragePaths.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\CodeMap\Localization\*.json" Link="Localization\%(Filename)%(Extension)">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
   </ItemGroup>
 </Project>

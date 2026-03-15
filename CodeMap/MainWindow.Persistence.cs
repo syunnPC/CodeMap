@@ -185,7 +185,7 @@ public sealed partial class MainWindow
     {
         try
         {
-            await Task.Delay(250, cancellationTokenSource.Token).ConfigureAwait(false);
+            await Task.Delay(JsonFileWriteDebounceMilliseconds, cancellationTokenSource.Token).ConfigureAwait(false);
             string json = JsonSerializer.Serialize(
                 value,
                 typeof(T),
@@ -228,25 +228,11 @@ public sealed partial class MainWindow
     {
         try
         {
-            string? directoryPath = Path.GetDirectoryName(filePath);
-            if (!string.IsNullOrWhiteSpace(directoryPath))
-            {
-                Directory.CreateDirectory(directoryPath);
-            }
-
-            string tempFilePath = $"{filePath}.{Guid.NewGuid():N}.tmp";
-            try
-            {
-                await File.WriteAllTextAsync(tempFilePath, content, cancellationToken).ConfigureAwait(false);
-                File.Move(tempFilePath, filePath, overwrite: true);
-            }
-            finally
-            {
-                if (File.Exists(tempFilePath))
-                {
-                    File.Delete(tempFilePath);
-                }
-            }
+            await WriteTextFileAtomicallyCoreAsync(
+                filePath,
+                content,
+                cancellationToken,
+                static (path, text, token) => File.WriteAllTextAsync(path, text, token)).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -300,29 +286,48 @@ public sealed partial class MainWindow
     {
         try
         {
-            string? directoryPath = Path.GetDirectoryName(filePath);
-            if (!string.IsNullOrWhiteSpace(directoryPath))
-            {
-                Directory.CreateDirectory(directoryPath);
-            }
-
-            string tempFilePath = $"{filePath}.{Guid.NewGuid():N}.tmp";
-            try
-            {
-                File.WriteAllText(tempFilePath, content);
-                File.Move(tempFilePath, filePath, overwrite: true);
-            }
-            finally
-            {
-                if (File.Exists(tempFilePath))
-                {
-                    File.Delete(tempFilePath);
-                }
-            }
+            WriteTextFileAtomicallyCoreAsync(
+                    filePath,
+                    content,
+                    CancellationToken.None,
+                    static (path, text, _) =>
+                    {
+                        File.WriteAllText(path, text);
+                        return Task.CompletedTask;
+                    })
+                .GetAwaiter()
+                .GetResult();
         }
         catch (Exception ex)
         {
             throw new IOException($"ファイル書き込みに失敗しました: {filePath}", ex);
+        }
+    }
+
+    private static async Task WriteTextFileAtomicallyCoreAsync(
+        string filePath,
+        string content,
+        CancellationToken cancellationToken,
+        Func<string, string, CancellationToken, Task> writeContentAsync)
+    {
+        string? directoryPath = Path.GetDirectoryName(filePath);
+        if (!string.IsNullOrWhiteSpace(directoryPath))
+        {
+            Directory.CreateDirectory(directoryPath);
+        }
+
+        string tempFilePath = $"{filePath}.{Guid.NewGuid():N}.tmp";
+        try
+        {
+            await writeContentAsync(tempFilePath, content, cancellationToken).ConfigureAwait(false);
+            File.Move(tempFilePath, filePath, overwrite: true);
+        }
+        finally
+        {
+            if (File.Exists(tempFilePath))
+            {
+                File.Delete(tempFilePath);
+            }
         }
     }
 

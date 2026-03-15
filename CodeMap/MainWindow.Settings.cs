@@ -33,13 +33,13 @@ public sealed partial class MainWindow
 
         ScrollViewer scrollViewer = new()
         {
-            MaxHeight = 640
+            MaxHeight = SettingsDialogMaxHeight
         };
 
         StackPanel root = new()
         {
-            Spacing = 18,
-            MaxWidth = 720
+            Spacing = SettingsDialogRootSpacing,
+            MaxWidth = SettingsDialogMaxWidth
         };
         scrollViewer.Content = root;
         dialog.Content = scrollViewer;
@@ -64,7 +64,7 @@ public sealed partial class MainWindow
         StackPanel section = CreateSettingsSection(T("settings.section.general"));
         ComboBox languageComboBox = new()
         {
-            MinWidth = 220,
+            MinWidth = SettingsComboMinWidth,
             HorizontalAlignment = HorizontalAlignment.Left
         };
         languageComboBox.Items.Add(new ComboBoxItem
@@ -97,7 +97,7 @@ public sealed partial class MainWindow
 
         ComboBox themeComboBox = new()
         {
-            MinWidth = 220,
+            MinWidth = SettingsComboMinWidth,
             HorizontalAlignment = HorizontalAlignment.Left
         };
         themeComboBox.Items.Add(new ComboBoxItem
@@ -187,14 +187,14 @@ public sealed partial class MainWindow
 
         StackPanel itemsPanel = new()
         {
-            Spacing = 8
+            Spacing = SettingsSectionSpacing
         };
 
         foreach (HiddenNodeViewState hiddenNode in hiddenNodes)
         {
             Grid row = new()
             {
-                ColumnSpacing = 12
+                ColumnSpacing = SettingsHiddenNodesRowColumnSpacing
             };
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
             row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -288,13 +288,13 @@ public sealed partial class MainWindow
     {
         StackPanel section = new()
         {
-            Spacing = 8
+            Spacing = SettingsSectionSpacing
         };
         section.Children.Add(new TextBlock
         {
             Text = title,
             FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-            FontSize = 15
+            FontSize = SettingsSectionHeaderFontSize
         });
         return section;
     }
@@ -303,9 +303,9 @@ public sealed partial class MainWindow
     {
         Grid row = new()
         {
-            ColumnSpacing = 16
+            ColumnSpacing = SettingsRowColumnSpacing
         };
-        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(220) });
+        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(SettingsRowLabelColumnWidth) });
         row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
         row.Children.Add(new TextBlock
@@ -776,7 +776,7 @@ public sealed partial class MainWindow
         {
             await GraphWebView.CoreWebView2.CallDevToolsProtocolMethodAsync(
                 "Storage.clearDataForOrigin",
-                "{\"origin\":\"https://codemap.local\",\"storageTypes\":\"all\"}");
+                $"{{\"origin\":\"{GraphHostOrigin}\",\"storageTypes\":\"all\"}}");
         }
         catch (Exception ex)
         {
@@ -882,12 +882,12 @@ public sealed partial class MainWindow
 
         ScrollViewer scrollViewer = new()
         {
-            MaxHeight = 480,
+            MaxHeight = DiagnosticsDialogMaxHeight,
             Content = new TextBlock
             {
                 Text = _diagnosticsText,
                 FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Cascadia Mono, Consolas"),
-                FontSize = 12.5,
+                FontSize = DiagnosticsDialogFontSize,
                 TextWrapping = TextWrapping.Wrap,
                 IsTextSelectionEnabled = true,
                 Foreground = GetThemeBrush(

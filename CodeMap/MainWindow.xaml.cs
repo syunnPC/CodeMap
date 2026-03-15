@@ -59,22 +59,6 @@ public sealed partial class MainWindow : Window
         Failed = 3
     }
 
-    private const int MaxTreeItemsPerSection = 96;
-    private const int MaxRecentSolutions = 20;
-    private const int MaxDiagnosticsEntries = 2000;
-    private const double WorkspaceSplitDividerHeight = 14;
-    private const double ExplorerPanelSplitDividerWidth = 12;
-    private const double MinExplorerPanelWidth = 240;
-    private const double MinGraphPanelWidth = 420;
-    private const double MinWorkspaceSplitRatio = 0.2;
-    private const double MaxWorkspaceSplitRatio = 0.8;
-    private const int DefaultGraphPanelWidth = 320;
-    private const int MinGraphSidebarPanelWidth = 220;
-    private const int MaxGraphSidebarPanelWidth = 640;
-    private const int DefaultGraphMobilePanelHeight = 320;
-    private const int MinGraphMobilePanelHeight = 180;
-    private const int MaxGraphMobilePanelHeight = 1600;
-    private const int MaxGraphFrontendRetryAttempts = 3;
     private const string GraphUiVersion = "graph-ui-20260313a";
 
     private string BrowseFileOptionLabel => T("browse.solutionFile");
@@ -96,8 +80,8 @@ public sealed partial class MainWindow : Window
     private bool _isWorkspaceSplit;
     private bool _isDraggingWorkspaceSplitDivider;
     private bool _isDraggingExplorerPanelSplitDivider;
-    private double _explorerPanelWidth = 300;
-    private double _workspaceSplitRatio = 0.5;
+    private double _explorerPanelWidth = DefaultExplorerPanelWidth;
+    private double _workspaceSplitRatio = DefaultWorkspaceSplitRatio;
     private static readonly string s_logFilePath = AppStoragePaths.LogFilePath;
     private static readonly Lazy<AsyncFileLogger> s_asyncFileLogger = new(() => new AsyncFileLogger(s_logFilePath));
     private static readonly string s_captureDirectoryPath = AppStoragePaths.CaptureDirectoryPath;
@@ -1758,7 +1742,7 @@ public sealed partial class MainWindow : Window
 
         WebView2 replacementWebView = new()
         {
-            MinHeight = 360,
+            MinHeight = GraphWebViewMinimumHeight,
             HorizontalAlignment = HorizontalAlignment.Stretch,
             VerticalAlignment = VerticalAlignment.Stretch
         };
@@ -1838,14 +1822,13 @@ public sealed partial class MainWindow : Window
                 throw new FileNotFoundException("グラフ フロントエンドのファイルが見つかりません。", graphPagePath);
             }
 
-            const string graphHost = "codemap.local";
             GraphWebView.CoreWebView2.SetVirtualHostNameToFolderMapping(
-                graphHost,
+                GraphHostName,
                 webRootPath,
                 CoreWebView2HostResourceAccessKind.Allow);
 
             string cacheToken = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds().ToString();
-            Uri graphUri = new($"https://{graphHost}/Graph/index.html?v={cacheToken}");
+            Uri graphUri = new($"{GraphHostOrigin}/Graph/index.html?v={cacheToken}");
             LogInfo($"グラフ ソースを設定しました: {graphUri}");
             GraphWebView.Source = graphUri;
         }
@@ -2041,7 +2024,7 @@ public sealed partial class MainWindow : Window
     {
         try
         {
-            if (e.NewSize.Height < 64)
+            if (e.NewSize.Height < GraphSurfaceCollapsedHeightThreshold)
             {
                 await EnsureGraphSurfaceVisibleAsync();
             }
@@ -2082,9 +2065,11 @@ public sealed partial class MainWindow : Window
                 return;
             }
 
-            double fallbackHeight = Math.Max(420, Math.Min(1024, RootLayout.ActualHeight * 0.68));
+            double fallbackHeight = Math.Max(
+                GraphSurfaceFallbackMinHeight,
+                Math.Min(GraphSurfaceFallbackMaxHeight, RootLayout.ActualHeight * GraphSurfaceFallbackHeightRatio));
             bool forcedHeightApplied = false;
-            if (GraphWebView.ActualHeight < 64)
+            if (GraphWebView.ActualHeight < GraphSurfaceCollapsedHeightThreshold)
             {
                 GraphWebView.Height = fallbackHeight;
                 forcedHeightApplied = true;
@@ -2393,7 +2378,7 @@ public sealed partial class MainWindow : Window
                             int boundsY2 = TryGetInt(root, "boundsY2");
                             AppendDiagnosticsLine($"グラフ境界: ({boundsX1},{boundsY1})-({boundsX2},{boundsY2})");
                         }
-                        if (GraphWebView.ActualHeight < 64)
+                        if (GraphWebView.ActualHeight < GraphSurfaceCollapsedHeightThreshold)
                         {
                             _ = EnsureGraphSurfaceVisibleAsync();
                         }
@@ -3032,7 +3017,10 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        double minimumPaneHeight = Math.Clamp(availableHeight * 0.18, 72, 180);
+        double minimumPaneHeight = Math.Clamp(
+            availableHeight * WorkspaceSplitMinimumPaneRatio,
+            WorkspaceSplitMinimumPaneMinHeight,
+            WorkspaceSplitMinimumPaneMaxHeight);
         double pointerY = e.GetCurrentPoint(ExplorerContentGrid).Position.Y;
         double clampedTreeHeight = Math.Clamp(
             pointerY,
@@ -3084,7 +3072,9 @@ public sealed partial class MainWindow : Window
     {
         try
         {
-            await Task.Delay(TimeSpan.FromMilliseconds(400 * attempt), retryTokenSource.Token);
+            await Task.Delay(
+                TimeSpan.FromMilliseconds(GraphFrontendRetryBaseDelayMilliseconds * attempt),
+                retryTokenSource.Token);
             if (_isWindowClosed || retryTokenSource.IsCancellationRequested)
             {
                 return;
@@ -3126,7 +3116,7 @@ public sealed partial class MainWindow : Window
         _isRecoveringGraphFrontend = true;
         try
         {
-            await Task.Delay(250);
+            await Task.Delay(GraphFrontendRecoveryDelayMilliseconds);
             if (_isWindowClosed)
             {
                 return;
