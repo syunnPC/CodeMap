@@ -11,12 +11,23 @@ type LayoutSelectionMetrics = VisibleGraphMetrics & {
   averageDegree: number;
 };
 
-function applyPreferredLayoutForPayload(payload: GraphPayload): void {
+function applyPreferredLayoutForPayload(
+  payload: GraphPayload,
+  performanceSample: GraphRenderPerformanceSample | null = null): void
+{
+  const layoutStartedAt = performance.now();
   const metrics = state.cy
     ? collectVisibleGraphMetricsFromCy()
     : collectLayoutSelectionMetrics(payload);
   const preferredLayout = resolvePreferredLayoutName(metrics);
-  applyPreferredLayout(preferredLayout, metrics);
+  if (performanceSample) {
+    performanceSample.layoutName = preferredLayout;
+  }
+
+  applyPreferredLayout(preferredLayout, metrics, performanceSample);
+  if (performanceSample) {
+    performanceSample.layoutMs = performance.now() - layoutStartedAt;
+  }
 }
 
 function collectLayoutSelectionMetrics(payload: GraphPayload): LayoutSelectionMetrics {
@@ -237,7 +248,11 @@ function resolvePreferredLayoutName(metrics: LayoutSelectionMetrics): string {
   return "semantic-flow";
 }
 
-function applyPreferredLayout(layoutName: string, metrics: VisibleGraphMetrics): void {
+function applyPreferredLayout(
+  layoutName: string,
+  metrics: VisibleGraphMetrics,
+  performanceSample: GraphRenderPerformanceSample | null = null): void
+{
   if (!state.cy) {
     return;
   }
@@ -251,20 +266,20 @@ function applyPreferredLayout(layoutName: string, metrics: VisibleGraphMetrics):
 
   if (layoutName === "semantic-flow") {
     applySemanticFlowLayout(metrics);
-    finalizeAppliedLayout(visibleElements, metrics);
+    finalizeAppliedLayout(visibleElements, metrics, performanceSample);
     return;
   }
 
   if (layoutName === "structured-massive") {
     applyStructuredMassiveLayout(metrics);
-    finalizeAppliedLayout(visibleElements, metrics);
+    finalizeAppliedLayout(visibleElements, metrics, performanceSample);
     return;
   }
 
-  applyLayout(layoutName);
+  applyLayout(layoutName, performanceSample);
 }
 
-function applyLayout(layoutName: string): void {
+function applyLayout(layoutName: string, performanceSample: GraphRenderPerformanceSample | null = null): void {
   if (!state.cy) {
     return;
   }
@@ -280,17 +295,17 @@ function applyLayout(layoutName: string): void {
 
   if (layoutName === "semantic-flow") {
     applySemanticFlowLayout(metrics);
-    finalizeAppliedLayout(visibleElements, metrics);
+    finalizeAppliedLayout(visibleElements, metrics, performanceSample);
     return;
   }
 
   if (layoutName === "structured-massive") {
     applyStructuredMassiveLayout(metrics);
-    finalizeAppliedLayout(visibleElements, metrics);
+    finalizeAppliedLayout(visibleElements, metrics, performanceSample);
     return;
   }
 
-  runCytoscapeLayout(visibleElements, resolveCytoscapeLayoutOptions(layoutName, metrics), metrics);
+  runCytoscapeLayout(visibleElements, resolveCytoscapeLayoutOptions(layoutName, metrics), metrics, performanceSample);
 }
 
 function collectVisibleGraphMetricsFromCy(): LayoutSelectionMetrics {
@@ -493,26 +508,50 @@ function resolveCytoscapeLayoutOptions(layoutName: string, metrics: VisibleGraph
   }
 }
 
-function runCytoscapeLayout(elements: any, options: any, metrics: VisibleGraphMetrics): void {
+function runCytoscapeLayout(
+  elements: any,
+  options: any,
+  metrics: VisibleGraphMetrics,
+  performanceSample: GraphRenderPerformanceSample | null = null): void
+{
   if (!state.cy || !elements || elements.length === 0) {
     return;
+  }
+
+  if (performanceSample) {
+    performanceSample.awaitingAsyncLayout = true;
+    performanceSample.asyncLayoutStartedAt = performance.now();
   }
 
   const layout = elements.layout({
     ...options,
     stop: () => {
-      finalizeAppliedLayout(elements, metrics);
+      if (performanceSample && performanceSample.asyncLayoutStartedAt !== null) {
+        performanceSample.asyncLayoutMs = performance.now() - performanceSample.asyncLayoutStartedAt;
+      }
+
+      finalizeAppliedLayout(elements, metrics, performanceSample);
+      if (performanceSample) {
+        performanceSample.awaitingAsyncLayout = false;
+        performanceSample.totalUntilLayoutStopMs = performance.now() - performanceSample.startedAt;
+        postGraphPerformanceMetrics(performanceSample, "layout-stop");
+      }
     }
   });
 
   layout.run();
 }
 
-function finalizeAppliedLayout(elements: any, metrics: VisibleGraphMetrics): void {
+function finalizeAppliedLayout(
+  elements: any,
+  metrics: VisibleGraphMetrics,
+  performanceSample: GraphRenderPerformanceSample | null = null): void
+{
   if (!state.cy) {
     return;
   }
 
+  const finalizeStartedAt = performance.now();
   separateOverlappingNodeCollisions();
   if (metrics.visibleNodeCount <= 260) {
     separateOverlappingHighLevelNodes();
@@ -521,6 +560,12 @@ function finalizeAppliedLayout(elements: any, metrics: VisibleGraphMetrics): voi
   fitGraphViewportToCollection(elements, resolveViewportPadding(metrics));
   ensureReadableZoom(resolveMinimumReadableZoom(metrics.visibleNodeCount));
   forceGraphRender();
+  if (performanceSample) {
+    performanceSample.finalizeMs = performance.now() - finalizeStartedAt;
+    if (!performanceSample.awaitingAsyncLayout) {
+      performanceSample.totalUntilLayoutStopMs = performance.now() - performanceSample.startedAt;
+    }
+  }
 }
 
 function resolveViewportPadding(metrics: VisibleGraphMetrics): number {

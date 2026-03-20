@@ -194,6 +194,29 @@ type Locale = "ja" | "en";
 type GraphPerformanceMode = "normal" | "large" | "massive";
 type HostTheme = "light" | "dark" | "system";
 
+interface GraphRenderPerformanceSample {
+  renderSequence: number;
+  payloadNodeCount: number;
+  payloadEdgeCount: number;
+  startedAt: number;
+  prepareMs: number;
+  buildElementsMs: number;
+  cyRebuildMs: number;
+  visibilityMs: number;
+  layoutMs: number;
+  pinnedMs: number;
+  applyStateMs: number;
+  totalMs: number;
+  visibleNodeCount: number;
+  visibleEdgeCount: number;
+  layoutName: string;
+  awaitingAsyncLayout: boolean;
+  asyncLayoutStartedAt: number | null;
+  asyncLayoutMs: number | null;
+  finalizeMs: number | null;
+  totalUntilLayoutStopMs: number | null;
+}
+
 const translations: Record<Locale, Record<string, string>> = {
   ja: {
     "page.title": "CodeMap グラフ",
@@ -337,6 +360,7 @@ const translations: Record<Locale, Record<string, string>> = {
     "error.invalidFocusRequest": "フォーカス要求が不正です。",
     "error.invalidSavedViewState": "保存された表示状態ファイルが不正です。",
     "error.invalidSearchQueryPayload": "検索条件メッセージが不正です。",
+    "error.invalidPerformanceMetricsPayload": "計測モード設定メッセージが不正です。",
     "error.invalidSetLocalePayload": "ロケール設定メッセージが不正です。",
     "error.invalidSetThemePayload": "テーマ設定メッセージが不正です。",
     "error.stateCyNull": "グラフ描画エンジンが初期化されていません。"
@@ -483,6 +507,7 @@ const translations: Record<Locale, Record<string, string>> = {
     "error.invalidFocusRequest": "The focus request is invalid.",
     "error.invalidSavedViewState": "The saved view state file is invalid.",
     "error.invalidSearchQueryPayload": "The search query payload is invalid.",
+    "error.invalidPerformanceMetricsPayload": "The performance metrics payload is invalid.",
     "error.invalidSetLocalePayload": "The locale payload is invalid.",
     "error.invalidSetThemePayload": "The theme payload is invalid.",
     "error.stateCyNull": "The graph renderer is not initialized."
@@ -558,6 +583,8 @@ const state = {
   panelWidth: DEFAULT_PANEL_WIDTH,
   mobilePanelHeight: DEFAULT_MOBILE_PANEL_HEIGHT,
   graphPerformanceMode: "normal" as GraphPerformanceMode,
+  performanceMetricsEnabled: false,
+  nextRenderSequence: 0,
   hasSearchHighlightClasses: false,
   hasFocusedModeClasses: false,
   pinnedNodes: [] as PinnedNodeViewState[],
@@ -1353,6 +1380,71 @@ function cancelScheduledSearchHighlights(): void {
   pendingSearchHighlightFrame = null;
 }
 
+function createGraphRenderPerformanceSample(payload: GraphPayload): GraphRenderPerformanceSample {
+  return {
+    renderSequence: ++state.nextRenderSequence,
+    payloadNodeCount: payload.nodes.length,
+    payloadEdgeCount: payload.edges.length,
+    startedAt: performance.now(),
+    prepareMs: 0,
+    buildElementsMs: 0,
+    cyRebuildMs: 0,
+    visibilityMs: 0,
+    layoutMs: 0,
+    pinnedMs: 0,
+    applyStateMs: 0,
+    totalMs: 0,
+    visibleNodeCount: 0,
+    visibleEdgeCount: 0,
+    layoutName: "",
+    awaitingAsyncLayout: false,
+    asyncLayoutStartedAt: null,
+    asyncLayoutMs: null,
+    finalizeMs: null,
+    totalUntilLayoutStopMs: null
+  };
+}
+
+function roundPerformanceMs(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+function postGraphPerformanceMetrics(sample: GraphRenderPerformanceSample, phase: string): void {
+  postHostMessage({
+    type: "graph-performance-metrics",
+    phase,
+    renderSequence: sample.renderSequence,
+    payloadNodeCount: sample.payloadNodeCount,
+    payloadEdgeCount: sample.payloadEdgeCount,
+    visibleNodeCount: sample.visibleNodeCount,
+    visibleEdgeCount: sample.visibleEdgeCount,
+    layoutName: sample.layoutName,
+    totalMs: sample.totalMs > 0 ? roundPerformanceMs(sample.totalMs) : undefined,
+    buildElementsMs: sample.buildElementsMs > 0 ? roundPerformanceMs(sample.buildElementsMs) : undefined,
+    cyRebuildMs: sample.cyRebuildMs > 0 ? roundPerformanceMs(sample.cyRebuildMs) : undefined,
+    visibilityMs: sample.visibilityMs > 0 ? roundPerformanceMs(sample.visibilityMs) : undefined,
+    layoutMs: sample.layoutMs > 0 ? roundPerformanceMs(sample.layoutMs) : undefined,
+    pinnedMs: sample.pinnedMs > 0 ? roundPerformanceMs(sample.pinnedMs) : undefined,
+    applyStateMs: sample.applyStateMs > 0 ? roundPerformanceMs(sample.applyStateMs) : undefined,
+    asyncLayoutMs: sample.asyncLayoutMs !== null ? roundPerformanceMs(sample.asyncLayoutMs) : undefined,
+    finalizeMs: sample.finalizeMs !== null ? roundPerformanceMs(sample.finalizeMs) : undefined,
+    totalUntilLayoutStopMs: sample.totalUntilLayoutStopMs !== null
+      ? roundPerformanceMs(sample.totalUntilLayoutStopMs)
+      : undefined
+  });
+}
+
+function parsePerformanceMetricsMode(raw: unknown): boolean | null {
+  if (typeof raw !== "object" || raw === null) {
+    return null;
+  }
+
+  const candidate = raw as { enabled?: unknown };
+  return typeof candidate.enabled === "boolean"
+    ? candidate.enabled
+    : null;
+}
+
 function onHostMessage(event: MessageEvent): void {
   try {
     const incoming = parseMessage(event.data);
@@ -1420,6 +1512,20 @@ function onHostMessage(event: MessageEvent): void {
       return;
     }
 
+    if (incoming.type === "set-performance-metrics") {
+      const enabled = parsePerformanceMetricsMode(incoming.data);
+      if (enabled === null) {
+        postHostMessage({
+          type: "graph-error",
+          message: t("error.invalidPerformanceMetricsPayload")
+        });
+        return;
+      }
+
+      state.performanceMetricsEnabled = enabled;
+      return;
+    }
+
     if (incoming.type === "clear-selection") {
       clearSelection(false);
       return;
@@ -1466,11 +1572,19 @@ function renderGraph(payload: GraphPayload): void {
       return;
     }
 
+    const performanceSample = state.performanceMetricsEnabled
+      ? createGraphRenderPerformanceSample(payload)
+      : null;
     state.lastPayload = payload;
     impactNodeCountCache.clear();
+    const prepareStartedAt = performance.now();
     syncSymbolKindVisibility(payload);
     renderSymbolTypeFilters(payload);
-    rebuildGraphFromPayload();
+    if (performanceSample) {
+      performanceSample.prepareMs = performance.now() - prepareStartedAt;
+    }
+
+    rebuildGraphFromPayload(performanceSample);
   }
   catch (error) {
     postHostMessage({
@@ -1480,7 +1594,7 @@ function renderGraph(payload: GraphPayload): void {
   }
 }
 
-function rebuildGraphFromPayload(): void {
+function rebuildGraphFromPayload(performanceSample: GraphRenderPerformanceSample | null = null): void {
   if (!state.cy || !state.lastPayload) {
     return;
   }
@@ -1488,17 +1602,38 @@ function rebuildGraphFromPayload(): void {
   const payload = state.lastPayload;
   discardFocusedModePositionSnapshot();
   const pinnedNodeSnapshot = capturePinnedNodeState();
+  const buildElementsStartedAt = performance.now();
   const elements = buildGraphElements(payload);
+  if (performanceSample) {
+    performanceSample.buildElementsMs = performance.now() - buildElementsStartedAt;
+  }
 
+  const cyRebuildStartedAt = performance.now();
   state.cy.startBatch();
   state.cy.elements().remove();
   state.cy.add(elements);
   state.cy.endBatch();
+  if (performanceSample) {
+    performanceSample.cyRebuildMs = performance.now() - cyRebuildStartedAt;
+  }
 
   applyBaseVisibilityClasses();
-  applyPreferredLayoutForPayload(payload);
+  applyPreferredLayoutForPayload(payload, performanceSample);
+  const pinnedNodesStartedAt = performance.now();
   applyPinnedNodeState(pinnedNodeSnapshot);
-  applyGraphVisibilityFromState({ fitViewport: true });
+  if (performanceSample) {
+    performanceSample.pinnedMs = performance.now() - pinnedNodesStartedAt;
+  }
+
+  applyGraphVisibilityFromState({ fitViewport: true, performanceSample });
+  if (performanceSample && !performanceSample.awaitingAsyncLayout) {
+    performanceSample.totalMs = performance.now() - performanceSample.startedAt;
+    if (performanceSample.totalUntilLayoutStopMs === null) {
+      performanceSample.totalUntilLayoutStopMs = performanceSample.totalMs;
+    }
+
+    postGraphPerformanceMetrics(performanceSample, "render-graph");
+  }
 }
 
 function rerenderGraphFromState(fitViewport = true, relayoutOnExpand = false): void {
@@ -1512,12 +1647,20 @@ function applyGraphVisibilityFromState(options: {
   fitViewport: boolean;
   relayoutOnExpand?: boolean;
   previousVisibleNodeIds?: ReadonlySet<string> | null;
+  performanceSample?: GraphRenderPerformanceSample | null;
 }): void {
   if (!state.cy) {
     return;
   }
 
+  const applyStateStartedAt = performance.now();
+  const visibilityStartedAt = performance.now();
   const visibilityMetrics = applyBaseVisibilityClasses();
+  if (options.performanceSample) {
+    options.performanceSample.visibilityMs = performance.now() - visibilityStartedAt;
+    options.performanceSample.visibleNodeCount = visibilityMetrics.visibleNodeCount;
+    options.performanceSample.visibleEdgeCount = visibilityMetrics.visibleEdgeCount;
+  }
 
   const relayoutApplied =
     options.relayoutOnExpand === true &&
@@ -1558,6 +1701,11 @@ function applyGraphVisibilityFromState(options: {
       visibilityMetrics.visibleEdgeCount);
   }
 
+  if (options.performanceSample) {
+    options.performanceSample.visibleNodeCount = effectiveVisibleNodeCount;
+    options.performanceSample.visibleEdgeCount = state.cy.edges().not(".state-hidden").not(".filtered-out").length;
+  }
+
   ensureReadableZoom(resolveMinimumReadableZoom(effectiveVisibleNodeCount));
 
   if (state.selectedNodeId) {
@@ -1577,6 +1725,11 @@ function applyGraphVisibilityFromState(options: {
   if (!relayoutApplied) {
     forceGraphRender();
   }
+  if (options.performanceSample) {
+    options.performanceSample.applyStateMs = performance.now() - applyStateStartedAt;
+    options.performanceSample.totalMs = performance.now() - options.performanceSample.startedAt;
+  }
+
   postGraphRendered();
 }
 

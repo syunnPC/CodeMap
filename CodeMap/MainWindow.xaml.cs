@@ -59,6 +59,24 @@ public sealed partial class MainWindow : Window
         Failed = 3
     }
 
+    private sealed record GraphPayloadDispatchMetrics(
+        string ModeLabel,
+        int NodeCount,
+        int EdgeCount,
+        int MessageBytes,
+        long BuildMilliseconds,
+        long SerializeMilliseconds,
+        long DispatchStartedTimestamp,
+        long DispatchMilliseconds);
+
+    private sealed record GraphPayloadBuildMetrics(
+        string ModeLabel,
+        int NodeCount,
+        int EdgeCount,
+        int MessageBytes,
+        long BuildMilliseconds,
+        long SerializeMilliseconds);
+
     private const string GraphUiVersion = "graph-ui-20260321a";
 
     private string BrowseFileOptionLabel => T("browse.solutionFile");
@@ -93,6 +111,7 @@ public sealed partial class MainWindow : Window
     private const string WebView2BrowserArguments = "";
     private static readonly bool s_enableGraphPreviewCapture = IsFeatureEnabled("CODEMAP_GRAPH_CAPTURE");
     private static readonly bool s_enableVerboseGraphRenderDiagnostics = IsFeatureEnabled("CODEMAP_GRAPH_VERBOSE");
+    private static readonly bool s_enablePerformanceMetrics = AppLaunchOptions.Current.EnablePerformanceMetrics;
 
     private CancellationTokenSource? _analysisCancellationTokenSource;
     private bool _isGraphFrontendReady;
@@ -137,6 +156,8 @@ public sealed partial class MainWindow : Window
     private int _graphFrontendRetryAttemptCount;
     private GraphPayloadCompleteness _graphPayloadCompleteness;
     private bool _isFullGraphPayloadBuildQueued;
+    private GraphPayloadBuildMetrics? _pendingGraphPayloadBuildMetrics;
+    private GraphPayloadDispatchMetrics? _lastGraphPayloadDispatchMetrics;
     private static readonly HashSet<char> s_invalidFileNameChars = [.. Path.GetInvalidFileNameChars()];
 
     public MainWindow()
@@ -176,6 +197,32 @@ public sealed partial class MainWindow : Window
     private void AppendLocalizedDiagnostics(string key, params object[] args)
     {
         AppendDiagnosticsLine(T(key, args));
+    }
+
+    private void AppendGraphPerformanceMetrics(string phase, params object[] args)
+    {
+        object[] values = new object[args.Length + 1];
+        values[0] = phase;
+        for (int index = 0; index < args.Length; index++)
+        {
+            values[index + 1] = args[index];
+        }
+
+        AppendDiagnosticsLine(T("diag.graph.performanceMetrics", values));
+    }
+
+    private void AppendGraphHostPerformanceMetrics(GraphPayloadDispatchMetrics metrics, long untilRenderedMilliseconds)
+    {
+        AppendDiagnosticsLine(T(
+            "diag.graph.hostPerformanceMetrics",
+            metrics.ModeLabel,
+            metrics.NodeCount,
+            metrics.EdgeCount,
+            metrics.MessageBytes,
+            metrics.BuildMilliseconds,
+            metrics.SerializeMilliseconds,
+            metrics.DispatchMilliseconds,
+            untilRenderedMilliseconds));
     }
 
     private string ResolveGraphErrorMessage(string? message)
@@ -421,6 +468,32 @@ public sealed partial class MainWindow : Window
         }
     }
 
+    private void FlushGraphPerformanceMetricsMode()
+    {
+        if (!_isGraphFrontendReady || GraphWebView.CoreWebView2 is null || !s_enablePerformanceMetrics)
+        {
+            return;
+        }
+
+        try
+        {
+            GraphPerformanceMetricsModeMessage message = new(
+                "set-performance-metrics",
+                new GraphPerformanceMetricsModePayload(true));
+            string messageJson = JsonSerializer.Serialize(
+                message,
+                CodeMapJsonSerializerContext.Default.GraphPerformanceMetricsModeMessage);
+
+            GraphWebView.CoreWebView2.PostWebMessageAsJson(messageJson);
+        }
+        catch (Exception ex)
+        {
+            _isGraphFrontendReady = false;
+            AppendLocalizedDiagnostics("diag.graph.performanceModeSendFailed", ex.Message);
+            _ = RecoverGraphFrontendAsync(GraphRecoveryMode.RecreateControl);
+        }
+    }
+
     private string ResolveGraphThemeCode()
     {
         if (_currentThemePreference == AppThemePreference.Light)
@@ -477,6 +550,7 @@ public sealed partial class MainWindow : Window
             LogInfo($"Log file: {s_logFilePath}");
             LogInfo($"Graph preview capture: {(s_enableGraphPreviewCapture ? "enabled" : "disabled")}");
             LogInfo($"Graph verbose diagnostics: {(s_enableVerboseGraphRenderDiagnostics ? "enabled" : "disabled")}");
+            LogInfo($"Graph performance metrics: {(s_enablePerformanceMetrics ? "enabled" : "disabled")}");
             TryApplyPendingWebView2DataCleanup();
             await InitializeGraphFrontendAsync();
 
@@ -2222,6 +2296,7 @@ public sealed partial class MainWindow : Window
                     LogInfo("Graph frontend ready message received.");
                     _pendingGraphSearchQuery = _workspaceSearchQuery;
                     QueueGraphThemeUpdate();
+                    FlushGraphPerformanceMetricsMode();
                     bool hasGraphPayloadToRender = !string.IsNullOrWhiteSpace(_pendingGraphPayloadJson);
                     if (hasGraphPayloadToRender)
                     {
@@ -2359,6 +2434,51 @@ public sealed partial class MainWindow : Window
                         break;
                     }
 
+                case "graph-performance-metrics":
+                    {
+                        if (!s_enablePerformanceMetrics)
+                        {
+                            break;
+                        }
+
+                        string phase = TryGetString(root, "phase");
+                        int renderSequence = TryGetInt(root, "renderSequence");
+                        int payloadNodes = TryGetInt(root, "payloadNodeCount");
+                        int payloadEdges = TryGetInt(root, "payloadEdgeCount");
+                        int visibleNodes = TryGetInt(root, "visibleNodeCount");
+                        int visibleEdges = TryGetInt(root, "visibleEdgeCount");
+                        string layoutName = TryGetString(root, "layoutName");
+                        string totalMs = TryGetString(root, "totalMs");
+                        string buildElementsMs = TryGetString(root, "buildElementsMs");
+                        string cyRebuildMs = TryGetString(root, "cyRebuildMs");
+                        string visibilityMs = TryGetString(root, "visibilityMs");
+                        string layoutMs = TryGetString(root, "layoutMs");
+                        string pinnedMs = TryGetString(root, "pinnedMs");
+                        string applyStateMs = TryGetString(root, "applyStateMs");
+                        string asyncLayoutMs = TryGetString(root, "asyncLayoutMs");
+                        string finalizeMs = TryGetString(root, "finalizeMs");
+                        string totalUntilLayoutStopMs = TryGetString(root, "totalUntilLayoutStopMs");
+                        AppendGraphPerformanceMetrics(
+                            phase,
+                            renderSequence,
+                            payloadNodes,
+                            payloadEdges,
+                            visibleNodes,
+                            visibleEdges,
+                            string.IsNullOrWhiteSpace(layoutName) ? "-" : layoutName,
+                            string.IsNullOrWhiteSpace(totalMs) ? "-" : totalMs,
+                            string.IsNullOrWhiteSpace(buildElementsMs) ? "-" : buildElementsMs,
+                            string.IsNullOrWhiteSpace(cyRebuildMs) ? "-" : cyRebuildMs,
+                            string.IsNullOrWhiteSpace(visibilityMs) ? "-" : visibilityMs,
+                            string.IsNullOrWhiteSpace(layoutMs) ? "-" : layoutMs,
+                            string.IsNullOrWhiteSpace(pinnedMs) ? "-" : pinnedMs,
+                            string.IsNullOrWhiteSpace(applyStateMs) ? "-" : applyStateMs,
+                            string.IsNullOrWhiteSpace(asyncLayoutMs) ? "-" : asyncLayoutMs,
+                            string.IsNullOrWhiteSpace(finalizeMs) ? "-" : finalizeMs,
+                            string.IsNullOrWhiteSpace(totalUntilLayoutStopMs) ? "-" : totalUntilLayoutStopMs);
+                        break;
+                    }
+
                 case "graph-rendered":
                     {
                         string frameTag = TryGetString(root, "frameTag");
@@ -2436,6 +2556,15 @@ public sealed partial class MainWindow : Window
                             containerWidth,
                             containerHeight,
                             zoom);
+                        if (s_enablePerformanceMetrics &&
+                            _lastGraphPayloadDispatchMetrics is GraphPayloadDispatchMetrics dispatchMetrics)
+                        {
+                            long untilRenderedMilliseconds = (long)Math.Round(
+                                Stopwatch.GetElapsedTime(dispatchMetrics.DispatchStartedTimestamp).TotalMilliseconds,
+                                MidpointRounding.AwayFromZero);
+                            AppendGraphHostPerformanceMetrics(dispatchMetrics, untilRenderedMilliseconds);
+                        }
+
                         if (s_enableVerboseGraphRenderDiagnostics)
                         {
                             int boundsX1 = TryGetInt(root, "boundsX1");
@@ -2542,6 +2671,13 @@ public sealed partial class MainWindow : Window
                 graphPayload.MessageBytes,
                 graphPayload.BuildMilliseconds,
                 graphPayload.SerializeMilliseconds);
+            _pendingGraphPayloadBuildMetrics = new GraphPayloadBuildMetrics(
+                modeLabel,
+                graphPayload.Payload.Nodes.Count,
+                graphPayload.Payload.Edges.Count,
+                graphPayload.MessageBytes,
+                graphPayload.BuildMilliseconds,
+                graphPayload.SerializeMilliseconds);
             _lastGraphPayloadJson = graphPayload.MessageJson;
             _pendingGraphPayloadJson = graphPayload.MessageJson;
             _pendingGraphSearchQuery = _workspaceSearchQuery;
@@ -2561,6 +2697,7 @@ public sealed partial class MainWindow : Window
                 _isFullGraphPayloadBuildQueued = false;
             }
 
+            _pendingGraphPayloadBuildMetrics = null;
             AppendLocalizedDiagnostics("diag.graph.payloadBuildFailed", ex.Message);
             UpdateStatus(StatusCode.GraphBuildFailed);
             SetGraphRecoveryOverlay(isVisible: true, T("status.graphRetry"));
@@ -2598,8 +2735,25 @@ public sealed partial class MainWindow : Window
 
         try
         {
+            long dispatchStartedTimestamp = Stopwatch.GetTimestamp();
+            Stopwatch dispatchStopwatch = Stopwatch.StartNew();
             GraphWebView.CoreWebView2.PostWebMessageAsJson(_pendingGraphPayloadJson);
+            dispatchStopwatch.Stop();
             LogInfo("Graph payload posted to web frontend.");
+            if (_pendingGraphPayloadBuildMetrics is GraphPayloadBuildMetrics buildMetrics)
+            {
+                _lastGraphPayloadDispatchMetrics = new GraphPayloadDispatchMetrics(
+                    buildMetrics.ModeLabel,
+                    buildMetrics.NodeCount,
+                    buildMetrics.EdgeCount,
+                    buildMetrics.MessageBytes,
+                    buildMetrics.BuildMilliseconds,
+                    buildMetrics.SerializeMilliseconds,
+                    dispatchStartedTimestamp,
+                    dispatchStopwatch.ElapsedMilliseconds);
+            }
+
+            _pendingGraphPayloadBuildMetrics = null;
             _isGraphContentRendered = false;
             _pendingGraphPayloadJson = null;
         }

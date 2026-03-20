@@ -39,3 +39,9 @@ internal sealed record GraphSearchQueryPayload(string Query);
 internal sealed record GraphSearchQueryMessage(
     string Type,
     GraphSearchQueryPayload Data);
+
+internal sealed record GraphPerformanceMetricsModePayload(bool Enabled);
+
+internal sealed record GraphPerformanceMetricsModeMessage(
+    string Type,
+    GraphPerformanceMetricsModePayload Data);

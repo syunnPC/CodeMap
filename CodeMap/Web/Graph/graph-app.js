@@ -157,6 +157,7 @@ const translations = {
         "error.invalidFocusRequest": "フォーカス要求が不正です。",
         "error.invalidSavedViewState": "保存された表示状態ファイルが不正です。",
         "error.invalidSearchQueryPayload": "検索条件メッセージが不正です。",
+        "error.invalidPerformanceMetricsPayload": "計測モード設定メッセージが不正です。",
         "error.invalidSetLocalePayload": "ロケール設定メッセージが不正です。",
         "error.invalidSetThemePayload": "テーマ設定メッセージが不正です。",
         "error.stateCyNull": "グラフ描画エンジンが初期化されていません。"
@@ -303,6 +304,7 @@ const translations = {
         "error.invalidFocusRequest": "The focus request is invalid.",
         "error.invalidSavedViewState": "The saved view state file is invalid.",
         "error.invalidSearchQueryPayload": "The search query payload is invalid.",
+        "error.invalidPerformanceMetricsPayload": "The performance metrics payload is invalid.",
         "error.invalidSetLocalePayload": "The locale payload is invalid.",
         "error.invalidSetThemePayload": "The theme payload is invalid.",
         "error.stateCyNull": "The graph renderer is not initialized."
@@ -376,6 +378,8 @@ const state = {
     panelWidth: DEFAULT_PANEL_WIDTH,
     mobilePanelHeight: DEFAULT_MOBILE_PANEL_HEIGHT,
     graphPerformanceMode: "normal",
+    performanceMetricsEnabled: false,
+    nextRenderSequence: 0,
     hasSearchHighlightClasses: false,
     hasFocusedModeClasses: false,
     pinnedNodes: [],
@@ -1094,6 +1098,66 @@ function cancelScheduledSearchHighlights() {
     window.clearTimeout(pendingSearchHighlightFrame);
     pendingSearchHighlightFrame = null;
 }
+function createGraphRenderPerformanceSample(payload) {
+    return {
+        renderSequence: ++state.nextRenderSequence,
+        payloadNodeCount: payload.nodes.length,
+        payloadEdgeCount: payload.edges.length,
+        startedAt: performance.now(),
+        prepareMs: 0,
+        buildElementsMs: 0,
+        cyRebuildMs: 0,
+        visibilityMs: 0,
+        layoutMs: 0,
+        pinnedMs: 0,
+        applyStateMs: 0,
+        totalMs: 0,
+        visibleNodeCount: 0,
+        visibleEdgeCount: 0,
+        layoutName: "",
+        awaitingAsyncLayout: false,
+        asyncLayoutStartedAt: null,
+        asyncLayoutMs: null,
+        finalizeMs: null,
+        totalUntilLayoutStopMs: null
+    };
+}
+function roundPerformanceMs(value) {
+    return Math.round(value * 100) / 100;
+}
+function postGraphPerformanceMetrics(sample, phase) {
+    postHostMessage({
+        type: "graph-performance-metrics",
+        phase,
+        renderSequence: sample.renderSequence,
+        payloadNodeCount: sample.payloadNodeCount,
+        payloadEdgeCount: sample.payloadEdgeCount,
+        visibleNodeCount: sample.visibleNodeCount,
+        visibleEdgeCount: sample.visibleEdgeCount,
+        layoutName: sample.layoutName,
+        totalMs: sample.totalMs > 0 ? roundPerformanceMs(sample.totalMs) : undefined,
+        buildElementsMs: sample.buildElementsMs > 0 ? roundPerformanceMs(sample.buildElementsMs) : undefined,
+        cyRebuildMs: sample.cyRebuildMs > 0 ? roundPerformanceMs(sample.cyRebuildMs) : undefined,
+        visibilityMs: sample.visibilityMs > 0 ? roundPerformanceMs(sample.visibilityMs) : undefined,
+        layoutMs: sample.layoutMs > 0 ? roundPerformanceMs(sample.layoutMs) : undefined,
+        pinnedMs: sample.pinnedMs > 0 ? roundPerformanceMs(sample.pinnedMs) : undefined,
+        applyStateMs: sample.applyStateMs > 0 ? roundPerformanceMs(sample.applyStateMs) : undefined,
+        asyncLayoutMs: sample.asyncLayoutMs !== null ? roundPerformanceMs(sample.asyncLayoutMs) : undefined,
+        finalizeMs: sample.finalizeMs !== null ? roundPerformanceMs(sample.finalizeMs) : undefined,
+        totalUntilLayoutStopMs: sample.totalUntilLayoutStopMs !== null
+            ? roundPerformanceMs(sample.totalUntilLayoutStopMs)
+            : undefined
+    });
+}
+function parsePerformanceMetricsMode(raw) {
+    if (typeof raw !== "object" || raw === null) {
+        return null;
+    }
+    const candidate = raw;
+    return typeof candidate.enabled === "boolean"
+        ? candidate.enabled
+        : null;
+}
 function onHostMessage(event) {
     try {
         const incoming = parseMessage(event.data);
@@ -1152,6 +1216,18 @@ function onHostMessage(event) {
             applyHostTheme(theme);
             return;
         }
+        if (incoming.type === "set-performance-metrics") {
+            const enabled = parsePerformanceMetricsMode(incoming.data);
+            if (enabled === null) {
+                postHostMessage({
+                    type: "graph-error",
+                    message: t("error.invalidPerformanceMetricsPayload")
+                });
+                return;
+            }
+            state.performanceMetricsEnabled = enabled;
+            return;
+        }
         if (incoming.type === "clear-selection") {
             clearSelection(false);
             return;
@@ -1193,11 +1269,18 @@ function renderGraph(payload) {
             });
             return;
         }
+        const performanceSample = state.performanceMetricsEnabled
+            ? createGraphRenderPerformanceSample(payload)
+            : null;
         state.lastPayload = payload;
         impactNodeCountCache.clear();
+        const prepareStartedAt = performance.now();
         syncSymbolKindVisibility(payload);
         renderSymbolTypeFilters(payload);
-        rebuildGraphFromPayload();
+        if (performanceSample) {
+            performanceSample.prepareMs = performance.now() - prepareStartedAt;
+        }
+        rebuildGraphFromPayload(performanceSample);
     }
     catch (error) {
         postHostMessage({
@@ -1206,22 +1289,41 @@ function renderGraph(payload) {
         });
     }
 }
-function rebuildGraphFromPayload() {
+function rebuildGraphFromPayload(performanceSample = null) {
     if (!state.cy || !state.lastPayload) {
         return;
     }
     const payload = state.lastPayload;
     discardFocusedModePositionSnapshot();
     const pinnedNodeSnapshot = capturePinnedNodeState();
+    const buildElementsStartedAt = performance.now();
     const elements = buildGraphElements(payload);
+    if (performanceSample) {
+        performanceSample.buildElementsMs = performance.now() - buildElementsStartedAt;
+    }
+    const cyRebuildStartedAt = performance.now();
     state.cy.startBatch();
     state.cy.elements().remove();
     state.cy.add(elements);
     state.cy.endBatch();
+    if (performanceSample) {
+        performanceSample.cyRebuildMs = performance.now() - cyRebuildStartedAt;
+    }
     applyBaseVisibilityClasses();
-    applyPreferredLayoutForPayload(payload);
+    applyPreferredLayoutForPayload(payload, performanceSample);
+    const pinnedNodesStartedAt = performance.now();
     applyPinnedNodeState(pinnedNodeSnapshot);
-    applyGraphVisibilityFromState({ fitViewport: true });
+    if (performanceSample) {
+        performanceSample.pinnedMs = performance.now() - pinnedNodesStartedAt;
+    }
+    applyGraphVisibilityFromState({ fitViewport: true, performanceSample });
+    if (performanceSample && !performanceSample.awaitingAsyncLayout) {
+        performanceSample.totalMs = performance.now() - performanceSample.startedAt;
+        if (performanceSample.totalUntilLayoutStopMs === null) {
+            performanceSample.totalUntilLayoutStopMs = performanceSample.totalMs;
+        }
+        postGraphPerformanceMetrics(performanceSample, "render-graph");
+    }
 }
 function rerenderGraphFromState(fitViewport = true, relayoutOnExpand = false) {
     const previousVisibleNodeIds = relayoutOnExpand
@@ -1233,7 +1335,14 @@ function applyGraphVisibilityFromState(options) {
     if (!state.cy) {
         return;
     }
+    const applyStateStartedAt = performance.now();
+    const visibilityStartedAt = performance.now();
     const visibilityMetrics = applyBaseVisibilityClasses();
+    if (options.performanceSample) {
+        options.performanceSample.visibilityMs = performance.now() - visibilityStartedAt;
+        options.performanceSample.visibleNodeCount = visibilityMetrics.visibleNodeCount;
+        options.performanceSample.visibleEdgeCount = visibilityMetrics.visibleEdgeCount;
+    }
     const relayoutApplied = options.relayoutOnExpand === true &&
         !!options.previousVisibleNodeIds &&
         shouldRelayoutForExpandedVisibility(options.previousVisibleNodeIds, visibilityMetrics.visibleNodeIds);
@@ -1262,6 +1371,10 @@ function applyGraphVisibilityFromState(options) {
         clearDependencyMapClasses();
         applyGraphPerformanceModeFromCurrentVisibility(visibilityMetrics.visibleNodeCount, visibilityMetrics.visibleEdgeCount);
     }
+    if (options.performanceSample) {
+        options.performanceSample.visibleNodeCount = effectiveVisibleNodeCount;
+        options.performanceSample.visibleEdgeCount = state.cy.edges().not(".state-hidden").not(".filtered-out").length;
+    }
     ensureReadableZoom(resolveMinimumReadableZoom(effectiveVisibleNodeCount));
     if (state.selectedNodeId) {
         const selected = state.cy.getElementById(state.selectedNodeId);
@@ -1278,6 +1391,10 @@ function applyGraphVisibilityFromState(options) {
     tryApplyPendingFocusRequest();
     if (!relayoutApplied) {
         forceGraphRender();
+    }
+    if (options.performanceSample) {
+        options.performanceSample.applyStateMs = performance.now() - applyStateStartedAt;
+        options.performanceSample.totalMs = performance.now() - options.performanceSample.startedAt;
     }
     postGraphRendered();
 }
@@ -3399,12 +3516,19 @@ function cycleLayoutAndApply() {
     state.layoutIndex = (state.layoutIndex + 1) % layoutSequence.length;
     applyLayout(layoutSequence[state.layoutIndex]);
 }
-function applyPreferredLayoutForPayload(payload) {
+function applyPreferredLayoutForPayload(payload, performanceSample = null) {
+    const layoutStartedAt = performance.now();
     const metrics = state.cy
         ? collectVisibleGraphMetricsFromCy()
         : collectLayoutSelectionMetrics(payload);
     const preferredLayout = resolvePreferredLayoutName(metrics);
-    applyPreferredLayout(preferredLayout, metrics);
+    if (performanceSample) {
+        performanceSample.layoutName = preferredLayout;
+    }
+    applyPreferredLayout(preferredLayout, metrics, performanceSample);
+    if (performanceSample) {
+        performanceSample.layoutMs = performance.now() - layoutStartedAt;
+    }
 }
 function collectLayoutSelectionMetrics(payload) {
     const visibleNodeIds = new Set();
@@ -3574,7 +3698,7 @@ function resolvePreferredLayoutName(metrics) {
     }
     return "semantic-flow";
 }
-function applyPreferredLayout(layoutName, metrics) {
+function applyPreferredLayout(layoutName, metrics, performanceSample = null) {
     if (!state.cy) {
         return;
     }
@@ -3585,17 +3709,17 @@ function applyPreferredLayout(layoutName, metrics) {
     }
     if (layoutName === "semantic-flow") {
         applySemanticFlowLayout(metrics);
-        finalizeAppliedLayout(visibleElements, metrics);
+        finalizeAppliedLayout(visibleElements, metrics, performanceSample);
         return;
     }
     if (layoutName === "structured-massive") {
         applyStructuredMassiveLayout(metrics);
-        finalizeAppliedLayout(visibleElements, metrics);
+        finalizeAppliedLayout(visibleElements, metrics, performanceSample);
         return;
     }
-    applyLayout(layoutName);
+    applyLayout(layoutName, performanceSample);
 }
-function applyLayout(layoutName) {
+function applyLayout(layoutName, performanceSample = null) {
     if (!state.cy) {
         return;
     }
@@ -3608,15 +3732,15 @@ function applyLayout(layoutName) {
         : collectVisibleGraphMetricsFromCy();
     if (layoutName === "semantic-flow") {
         applySemanticFlowLayout(metrics);
-        finalizeAppliedLayout(visibleElements, metrics);
+        finalizeAppliedLayout(visibleElements, metrics, performanceSample);
         return;
     }
     if (layoutName === "structured-massive") {
         applyStructuredMassiveLayout(metrics);
-        finalizeAppliedLayout(visibleElements, metrics);
+        finalizeAppliedLayout(visibleElements, metrics, performanceSample);
         return;
     }
-    runCytoscapeLayout(visibleElements, resolveCytoscapeLayoutOptions(layoutName, metrics), metrics);
+    runCytoscapeLayout(visibleElements, resolveCytoscapeLayoutOptions(layoutName, metrics), metrics, performanceSample);
 }
 function collectVisibleGraphMetricsFromCy() {
     if (!state.cy) {
@@ -3799,22 +3923,35 @@ function resolveCytoscapeLayoutOptions(layoutName, metrics) {
             };
     }
 }
-function runCytoscapeLayout(elements, options, metrics) {
+function runCytoscapeLayout(elements, options, metrics, performanceSample = null) {
     if (!state.cy || !elements || elements.length === 0) {
         return;
+    }
+    if (performanceSample) {
+        performanceSample.awaitingAsyncLayout = true;
+        performanceSample.asyncLayoutStartedAt = performance.now();
     }
     const layout = elements.layout({
         ...options,
         stop: () => {
-            finalizeAppliedLayout(elements, metrics);
+            if (performanceSample && performanceSample.asyncLayoutStartedAt !== null) {
+                performanceSample.asyncLayoutMs = performance.now() - performanceSample.asyncLayoutStartedAt;
+            }
+            finalizeAppliedLayout(elements, metrics, performanceSample);
+            if (performanceSample) {
+                performanceSample.awaitingAsyncLayout = false;
+                performanceSample.totalUntilLayoutStopMs = performance.now() - performanceSample.startedAt;
+                postGraphPerformanceMetrics(performanceSample, "layout-stop");
+            }
         }
     });
     layout.run();
 }
-function finalizeAppliedLayout(elements, metrics) {
+function finalizeAppliedLayout(elements, metrics, performanceSample = null) {
     if (!state.cy) {
         return;
     }
+    const finalizeStartedAt = performance.now();
     separateOverlappingNodeCollisions();
     if (metrics.visibleNodeCount <= 260) {
         separateOverlappingHighLevelNodes();
@@ -3822,6 +3959,12 @@ function finalizeAppliedLayout(elements, metrics) {
     fitGraphViewportToCollection(elements, resolveViewportPadding(metrics));
     ensureReadableZoom(resolveMinimumReadableZoom(metrics.visibleNodeCount));
     forceGraphRender();
+    if (performanceSample) {
+        performanceSample.finalizeMs = performance.now() - finalizeStartedAt;
+        if (!performanceSample.awaitingAsyncLayout) {
+            performanceSample.totalUntilLayoutStopMs = performance.now() - performanceSample.startedAt;
+        }
+    }
 }
 function resolveViewportPadding(metrics) {
     if (metrics.visibleNodeCount >= 1400) {

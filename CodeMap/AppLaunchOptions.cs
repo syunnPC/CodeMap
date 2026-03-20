@@ -2,9 +2,10 @@ using System;
 
 namespace CodeMap;
 
-internal sealed record AppLaunchOptions(bool EnableConsoleDebugging)
+internal sealed record AppLaunchOptions(bool EnableConsoleDebugging, bool EnablePerformanceMetrics)
 {
     private const string EnableConsoleDebuggingOptionName = "enable-console-debugging";
+    private const string EnablePerformanceMetricsOptionName = "enable-performance-metrics";
 
     public static AppLaunchOptions Current { get; private set; } = CreateDefault();
 
@@ -16,6 +17,7 @@ internal sealed record AppLaunchOptions(bool EnableConsoleDebugging)
     private static AppLaunchOptions Parse(string[]? args)
     {
         bool enableConsoleDebugging = GetDefaultConsoleDebugging();
+        bool enablePerformanceMetrics = false;
 
         if (args is not null)
         {
@@ -25,10 +27,15 @@ internal sealed record AppLaunchOptions(bool EnableConsoleDebugging)
                 {
                     enableConsoleDebugging = parsedValue;
                 }
+
+                if (TryParseBooleanOption(argument, EnablePerformanceMetricsOptionName, out parsedValue))
+                {
+                    enablePerformanceMetrics = parsedValue;
+                }
             }
         }
 
-        return new AppLaunchOptions(enableConsoleDebugging);
+        return new AppLaunchOptions(enableConsoleDebugging, enablePerformanceMetrics);
     }
 
     private static bool TryParseBooleanOption(string? argument, string optionName, out bool value)
@@ -60,7 +67,7 @@ internal sealed record AppLaunchOptions(bool EnableConsoleDebugging)
 
     private static AppLaunchOptions CreateDefault()
     {
-        return new AppLaunchOptions(GetDefaultConsoleDebugging());
+        return new AppLaunchOptions(GetDefaultConsoleDebugging(), false);
     }
 
     private static bool TryParseBooleanToken(string rawValue, out bool value)

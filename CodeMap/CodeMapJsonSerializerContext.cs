@@ -20,6 +20,7 @@ namespace CodeMap;
 [JsonSerializable(typeof(GraphViewStateMessage))]
 [JsonSerializable(typeof(GraphFocusNodeMessage))]
 [JsonSerializable(typeof(GraphSearchQueryMessage))]
+[JsonSerializable(typeof(GraphPerformanceMetricsModeMessage))]
 internal sealed partial class CodeMapJsonSerializerContext : JsonSerializerContext
 {
 }
