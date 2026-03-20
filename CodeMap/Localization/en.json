@@ -82,6 +82,8 @@
   "diag.graph.messageReadFailed": "Warning: failed to read graph message: {0}",
   "diag.graph.messageReceived": "Info: web graph received a host message: nodes={0}, edges={1}",
   "diag.graph.navigationFailed": "Warning: graph frontend navigation failed: {0}",
+  "diag.graph.nativeLayoutApplied": "Info: applied native layout: nodes={0}, edges={1}, elapsedMs={2}",
+  "diag.graph.nativeLayoutSkipped": "Info: skipped native layout: reason={0}",
   "diag.graph.nodeFocusFailed": "Warning: node focus failed: nodeId={0}, reason={1}",
   "diag.graph.payloadBuildFailed": "Warning: failed to build graph payload: {0}",
   "diag.graph.payloadQueued": "Info: queued graph payload: mode={0}, nodes={1}, edges={2}, bytes={3}, buildMs={4}, serializeMs={5}",

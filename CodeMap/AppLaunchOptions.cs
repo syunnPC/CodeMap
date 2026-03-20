@@ -2,10 +2,11 @@ using System;
 
 namespace CodeMap;
 
-internal sealed record AppLaunchOptions(bool EnableConsoleDebugging, bool EnablePerformanceMetrics)
+internal sealed record AppLaunchOptions(bool EnableConsoleDebugging, bool EnablePerformanceMetrics, bool EnableNativeLayout)
 {
     private const string EnableConsoleDebuggingOptionName = "enable-console-debugging";
     private const string EnablePerformanceMetricsOptionName = "enable-performance-metrics";
+    private const string EnableNativeLayoutOptionName = "enable-native-layout";
 
     public static AppLaunchOptions Current { get; private set; } = CreateDefault();
 
@@ -18,6 +19,7 @@ internal sealed record AppLaunchOptions(bool EnableConsoleDebugging, bool Enable
     {
         bool enableConsoleDebugging = GetDefaultConsoleDebugging();
         bool enablePerformanceMetrics = false;
+        bool enableNativeLayout = false;
 
         if (args is not null)
         {
@@ -32,10 +34,15 @@ internal sealed record AppLaunchOptions(bool EnableConsoleDebugging, bool Enable
                 {
                     enablePerformanceMetrics = parsedValue;
                 }
+
+                if (TryParseBooleanOption(argument, EnableNativeLayoutOptionName, out parsedValue))
+                {
+                    enableNativeLayout = parsedValue;
+                }
             }
         }
 
-        return new AppLaunchOptions(enableConsoleDebugging, enablePerformanceMetrics);
+        return new AppLaunchOptions(enableConsoleDebugging, enablePerformanceMetrics, enableNativeLayout);
     }
 
     private static bool TryParseBooleanOption(string? argument, string optionName, out bool value)
@@ -67,7 +74,7 @@ internal sealed record AppLaunchOptions(bool EnableConsoleDebugging, bool Enable
 
     private static AppLaunchOptions CreateDefault()
     {
-        return new AppLaunchOptions(GetDefaultConsoleDebugging(), false);
+        return new AppLaunchOptions(GetDefaultConsoleDebugging(), false, false);
     }
 
     private static bool TryParseBooleanToken(string rawValue, out bool value)

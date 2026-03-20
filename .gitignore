@@ -2,6 +2,7 @@
 **/bin/
 **/obj/
 **/TestResults/
+CodeMap/Native/
 artifacts/
 AppPackages/
 BundleArtifacts/

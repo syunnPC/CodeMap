@@ -14,7 +14,9 @@ public sealed record GraphNodePayload(
     string? ParentId,
     string? SymbolKind,
     string? FileName = null,
-    bool IsInCycle = false);
+    bool IsInCycle = false,
+    float? X = null,
+    float? Y = null);
 
 public sealed record GraphEdgePayload(
     string Id,

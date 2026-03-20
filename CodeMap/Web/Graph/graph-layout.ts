@@ -759,7 +759,84 @@ function separateOverlappingDocumentNodes(): void {
   });
 }
 
+function separateVisibleBoundingBoxOverlaps(maxPasses = 3): void {
+  if (!state.cy) {
+    return;
+  }
+
+  const nodes = state.cy
+    .nodes()
+    .not(".state-hidden")
+    .not(".filtered-out")
+    .not(".pinned")
+    .toArray();
+  if (nodes.length < 2) {
+    return;
+  }
+
+  let movedAny = false;
+  for (let pass = 0; pass < maxPasses; pass += 1) {
+    const orderedNodes = nodes
+      .slice()
+      .sort((left: any, right: any) => left.boundingBox({ includeLabels: true }).x1 - right.boundingBox({ includeLabels: true }).x1);
+    let movedThisPass = false;
+
+    state.cy.startBatch();
+    for (let i = 0; i < orderedNodes.length; i += 1) {
+      const left = orderedNodes[i];
+      const leftBox = left.boundingBox({ includeLabels: true });
+      for (let j = i + 1; j < orderedNodes.length; j += 1) {
+        const right = orderedNodes[j];
+        const rightBox = right.boundingBox({ includeLabels: true });
+        if (rightBox.x1 > leftBox.x2 + 24) {
+          break;
+        }
+
+        const overlapX = Math.min(leftBox.x2, rightBox.x2) - Math.max(leftBox.x1, rightBox.x1);
+        const overlapY = Math.min(leftBox.y2, rightBox.y2) - Math.max(leftBox.y1, rightBox.y1);
+        if (overlapX <= 0 || overlapY <= 0) {
+          continue;
+        }
+
+        movedThisPass = true;
+        movedAny = true;
+
+        const leftPos = left.position();
+        const rightPos = right.position();
+        const dx = Number(rightPos.x ?? 0) - Number(leftPos.x ?? 0);
+        const dy = Number(rightPos.y ?? 0) - Number(leftPos.y ?? 0);
+
+        if (overlapX <= overlapY * 1.2) {
+          const delta = overlapX / 2 + 12;
+          const direction = dx >= 0 ? 1 : -1;
+          positionNodePreservingLock(left, Number(leftPos.x ?? 0) - delta * direction, Number(leftPos.y ?? 0));
+          positionNodePreservingLock(right, Number(rightPos.x ?? 0) + delta * direction, Number(rightPos.y ?? 0));
+        }
+        else {
+          const delta = overlapY / 2 + 10;
+          const direction = dy >= 0 ? 1 : -1;
+          positionNodePreservingLock(left, Number(leftPos.x ?? 0), Number(leftPos.y ?? 0) - delta * direction);
+          positionNodePreservingLock(right, Number(rightPos.x ?? 0), Number(rightPos.y ?? 0) + delta * direction);
+        }
+      }
+    }
+    state.cy.endBatch();
+
+    if (!movedThisPass) {
+      break;
+    }
+  }
+
+  if (movedAny) {
+    forceGraphRender();
+  }
+}
+
 function separateOverlappingNodeCollisions(): void {
+  if (state.lastPayload && payloadHasPresetPositions(state.lastPayload)) {
+    const passCount = state.cy && state.cy.nodes().length >= 1800 ? 2 : 4;
+    separateVisibleBoundingBoxOverlaps(passCount);
+  }
   separateOverlappingExternalDependencyNodes();
   separateOverlappingCollapsedNodes();
   separateOverlappingDocumentNodes();

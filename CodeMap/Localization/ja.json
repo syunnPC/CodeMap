@@ -82,6 +82,8 @@
   "diag.graph.messageReadFailed": "警告: グラフ メッセージの読み取りに失敗しました: {0}",
   "diag.graph.messageReceived": "情報: グラフ メッセージを Web 側が受信しました: nodes={0}, edges={1}",
   "diag.graph.navigationFailed": "警告: グラフ フロントエンドのナビゲーションに失敗しました: {0}",
+  "diag.graph.nativeLayoutApplied": "情報: ネイティブ レイアウトを適用しました: nodes={0}, edges={1}, elapsedMs={2}",
+  "diag.graph.nativeLayoutSkipped": "情報: ネイティブ レイアウトをスキップしました: reason={0}",
   "diag.graph.nodeFocusFailed": "警告: ノード フォーカスに失敗しました: nodeId={0}, reason={1}",
   "diag.graph.payloadBuildFailed": "警告: グラフ ペイロードの構築に失敗しました: {0}",
   "diag.graph.payloadQueued": "情報: グラフ ペイロードをキューに追加しました: mode={0}, nodes={1}, edges={2}, bytes={3}, buildMs={4}, serializeMs={5}",

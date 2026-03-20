@@ -95,4 +95,32 @@
     <PublishReadyToRun Condition="'$(Configuration)' != 'Debug'">True</PublishReadyToRun>
     <PublishTrimmed>false</PublishTrimmed>
   </PropertyGroup>
+
+  <PropertyGroup>
+    <LayoutLibPlatform Condition="'$(Platform)' == 'x86'">Win32</LayoutLibPlatform>
+    <LayoutLibPlatform Condition="'$(Platform)' == 'x64'">x64</LayoutLibPlatform>
+    <LayoutLibPlatform Condition="'$(Platform)' == 'ARM64'">ARM64</LayoutLibPlatform>
+    <LayoutLibOutputDirectory>$(MSBuildProjectDirectory)\Native\$(Platform)\$(Configuration)\</LayoutLibOutputDirectory>
+    <LayoutLibDllPath>$(LayoutLibOutputDirectory)LayoutLib.dll</LayoutLibDllPath>
+  </PropertyGroup>
+
+  <Target Name="BuildLayoutLib" BeforeTargets="BeforeBuild" Condition="'$(LayoutLibPlatform)' != ''">
+    <Exec Command="msbuild &quot;$(MSBuildProjectDirectory)\..\LayoutLib\LayoutLib.vcxproj&quot; /t:Build /p:Configuration=$(Configuration);Platform=$(LayoutLibPlatform)" />
+  </Target>
+
+  <Target Name="CopyLayoutLibToOutput" AfterTargets="Build">
+    <Copy
+      Condition="Exists('$(LayoutLibDllPath)')"
+      SourceFiles="$(LayoutLibDllPath)"
+      DestinationFiles="$(TargetDir)LayoutLib.dll"
+      SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="CopyLayoutLibToPublish" AfterTargets="Publish">
+    <Copy
+      Condition="Exists('$(LayoutLibDllPath)') and '$(PublishDir)' != ''"
+      SourceFiles="$(LayoutLibDllPath)"
+      DestinationFiles="$(PublishDir)LayoutLib.dll"
+      SkipUnchangedFiles="true" />
+  </Target>
 </Project>

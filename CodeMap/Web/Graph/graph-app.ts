@@ -66,6 +66,8 @@ interface GraphNodePayload {
   symbolKind?: string | null;
   fileName?: string | null;
   isInCycle?: boolean;
+  x?: number | null;
+  y?: number | null;
 }
 
 interface GraphEdgePayload {
@@ -1600,6 +1602,7 @@ function rebuildGraphFromPayload(performanceSample: GraphRenderPerformanceSample
   }
 
   const payload = state.lastPayload;
+  const hasPresetPositions = payloadHasPresetPositions(payload);
   discardFocusedModePositionSnapshot();
   const pinnedNodeSnapshot = capturePinnedNodeState();
   const buildElementsStartedAt = performance.now();
@@ -1618,14 +1621,22 @@ function rebuildGraphFromPayload(performanceSample: GraphRenderPerformanceSample
   }
 
   applyBaseVisibilityClasses();
-  applyPreferredLayoutForPayload(payload, performanceSample);
+  if (hasPresetPositions) {
+    if (performanceSample) {
+      performanceSample.layoutName = "host-native-preset";
+      performanceSample.layoutMs = 0;
+    }
+  }
+  else {
+    applyPreferredLayoutForPayload(payload, performanceSample);
+  }
   const pinnedNodesStartedAt = performance.now();
   applyPinnedNodeState(pinnedNodeSnapshot);
   if (performanceSample) {
     performanceSample.pinnedMs = performance.now() - pinnedNodesStartedAt;
   }
 
-  applyGraphVisibilityFromState({ fitViewport: true, performanceSample });
+  applyGraphVisibilityFromState({ fitViewport: true, finalizeLayout: hasPresetPositions, performanceSample });
   if (performanceSample && !performanceSample.awaitingAsyncLayout) {
     performanceSample.totalMs = performance.now() - performanceSample.startedAt;
     if (performanceSample.totalUntilLayoutStopMs === null) {
@@ -1645,6 +1656,7 @@ function rerenderGraphFromState(fitViewport = true, relayoutOnExpand = false): v
 
 function applyGraphVisibilityFromState(options: {
   fitViewport: boolean;
+  finalizeLayout?: boolean;
   relayoutOnExpand?: boolean;
   previousVisibleNodeIds?: ReadonlySet<string> | null;
   performanceSample?: GraphRenderPerformanceSample | null;
@@ -1670,7 +1682,7 @@ function applyGraphVisibilityFromState(options: {
     applyPreferredLayoutForPayload(state.lastPayload);
   }
 
-  if (options.fitViewport && !relayoutApplied) {
+  if (options.fitViewport && !relayoutApplied && !options.finalizeLayout) {
     fitGraphViewport(56);
   }
 
@@ -1722,7 +1734,20 @@ function applyGraphVisibilityFromState(options: {
   }
 
   tryApplyPendingFocusRequest();
-  if (!relayoutApplied) {
+  if (options.finalizeLayout && !relayoutApplied) {
+    const finalizeMetrics: VisibleGraphMetrics = {
+      visibleNodeCount: effectiveVisibleNodeCount,
+      visibleEdgeCount: state.cy.edges().not(".state-hidden").not(".filtered-out").length,
+      symbolNodeCount: state.cy.nodes().not(".state-hidden").not(".filtered-out")
+        .filter((node: any) => String(node.data("group") ?? "") === "symbol").length,
+      isolatedNodeCount: 0
+    };
+    finalizeAppliedLayout(
+      state.cy.elements().not(".state-hidden").not(".filtered-out"),
+      finalizeMetrics,
+      options.performanceSample ?? null);
+  }
+  else if (!relayoutApplied) {
     forceGraphRender();
   }
   if (options.performanceSample) {
@@ -2259,7 +2284,7 @@ function buildGraphElements(payload: GraphPayload): any[]
   const elements: any[] = [];
 
   for (const node of payload.nodes) {
-    elements.push({
+    const element: any = {
       data: {
         id: node.id,
         label: node.label,
@@ -2268,7 +2293,17 @@ function buildGraphElements(payload: GraphPayload): any[]
         fileName: node.fileName ?? null,
         isInCycle: node.isInCycle === true ? 1 : 0
       }
-    });
+    };
+    if (typeof node.x === "number" && Number.isFinite(node.x) &&
+      typeof node.y === "number" && Number.isFinite(node.y))
+    {
+      element.position = {
+        x: node.x,
+        y: node.y
+      };
+    }
+
+    elements.push(element);
   }
 
   for (const edge of payload.edges) {
@@ -2290,6 +2325,22 @@ function buildGraphElements(payload: GraphPayload): any[]
   }
 
   return elements;
+}
+
+function payloadHasPresetPositions(payload: GraphPayload): boolean {
+  if (!payload.nodes || payload.nodes.length === 0) {
+    return false;
+  }
+
+  for (const node of payload.nodes) {
+    if (typeof node.x !== "number" || !Number.isFinite(node.x) ||
+      typeof node.y !== "number" || !Number.isFinite(node.y))
+    {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 function shouldNodeBeVisible(nodeData: { id?: string; group?: string; symbolKind?: string | null; isInCycle?: number | boolean }): boolean {

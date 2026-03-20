@@ -112,6 +112,7 @@ public sealed partial class MainWindow : Window
     private static readonly bool s_enableGraphPreviewCapture = IsFeatureEnabled("CODEMAP_GRAPH_CAPTURE");
     private static readonly bool s_enableVerboseGraphRenderDiagnostics = IsFeatureEnabled("CODEMAP_GRAPH_VERBOSE");
     private static readonly bool s_enablePerformanceMetrics = AppLaunchOptions.Current.EnablePerformanceMetrics;
+    private static readonly bool s_enableNativeLayout = AppLaunchOptions.Current.EnableNativeLayout;
 
     private CancellationTokenSource? _analysisCancellationTokenSource;
     private bool _isGraphFrontendReady;
@@ -551,6 +552,7 @@ public sealed partial class MainWindow : Window
             LogInfo($"Graph preview capture: {(s_enableGraphPreviewCapture ? "enabled" : "disabled")}");
             LogInfo($"Graph verbose diagnostics: {(s_enableVerboseGraphRenderDiagnostics ? "enabled" : "disabled")}");
             LogInfo($"Graph performance metrics: {(s_enablePerformanceMetrics ? "enabled" : "disabled")}");
+            LogInfo($"Native layout: {(s_enableNativeLayout ? "enabled" : "disabled")}");
             TryApplyPendingWebView2DataCleanup();
             await InitializeGraphFrontendAsync();
 
@@ -2628,12 +2630,28 @@ public sealed partial class MainWindow : Window
     {
         try
         {
-            (GraphPayload Payload, string MessageJson, long BuildMilliseconds, long SerializeMilliseconds, int MessageBytes) graphPayload = await Task.Run(() =>
+            (GraphPayload Payload, string MessageJson, long BuildMilliseconds, long SerializeMilliseconds, int MessageBytes, bool NativeLayoutApplied, long NativeLayoutMilliseconds, string NativeLayoutFailureReason) graphPayload = await Task.Run(() =>
             {
                 Stopwatch stopwatch = Stopwatch.StartNew();
                 GraphPayload payload = completeness == GraphPayloadCompleteness.Full
                     ? GraphPayloadBuilder.Build(snapshot)
                     : GraphPayloadBuilder.Build(snapshot, includeSymbols: false);
+                bool nativeLayoutApplied = false;
+                long nativeLayoutMilliseconds = 0;
+                string nativeLayoutFailureReason = string.Empty;
+                if (s_enableNativeLayout && completeness == GraphPayloadCompleteness.Full)
+                {
+                    if (NativeLayoutService.TryApplyCoseLayout(
+                        payload,
+                        out GraphPayload nativeLayoutPayload,
+                        out nativeLayoutMilliseconds,
+                        out nativeLayoutFailureReason))
+                    {
+                        payload = nativeLayoutPayload;
+                        nativeLayoutApplied = true;
+                    }
+                }
+
                 long buildMilliseconds = stopwatch.ElapsedMilliseconds;
 
                 stopwatch.Restart();
@@ -2643,7 +2661,7 @@ public sealed partial class MainWindow : Window
                     CodeMapJsonSerializerContext.Default.GraphRenderMessage);
                 long serializeMilliseconds = stopwatch.ElapsedMilliseconds;
                 int messageBytes = Encoding.UTF8.GetByteCount(messageJson);
-                return (payload, messageJson, buildMilliseconds, serializeMilliseconds, messageBytes);
+                return (payload, messageJson, buildMilliseconds, serializeMilliseconds, messageBytes, nativeLayoutApplied, nativeLayoutMilliseconds, nativeLayoutFailureReason);
             });
 
             if (_isWindowClosed || requestVersion != Volatile.Read(ref _graphRenderRequestVersion))
@@ -2663,6 +2681,22 @@ public sealed partial class MainWindow : Window
             }
 
             string modeLabel = completeness == GraphPayloadCompleteness.Full ? "full" : "structure-only";
+            if (s_enableNativeLayout && completeness == GraphPayloadCompleteness.Full)
+            {
+                if (graphPayload.NativeLayoutApplied)
+                {
+                    AppendLocalizedDiagnostics(
+                        "diag.graph.nativeLayoutApplied",
+                        graphPayload.Payload.Nodes.Count,
+                        graphPayload.Payload.Edges.Count,
+                        graphPayload.NativeLayoutMilliseconds);
+                }
+                else
+                {
+                    AppendLocalizedDiagnostics("diag.graph.nativeLayoutSkipped", graphPayload.NativeLayoutFailureReason);
+                }
+            }
+
             AppendLocalizedDiagnostics(
                 "diag.graph.payloadQueued",
                 modeLabel,

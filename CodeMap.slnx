@@ -4,15 +4,16 @@
     <Platform Name="x64" />
     <Platform Name="x86" />
   </Configurations>
+  <Project Path="CodeMap.Tests/CodeMap.Tests.csproj" />
   <Project Path="CodeMap/CodeMap.csproj">
     <Platform Solution="*|ARM64" Project="ARM64" />
     <Platform Solution="*|x64" Project="x64" />
     <Platform Solution="*|x86" Project="x86" />
     <Deploy />
   </Project>
-  <Project Path="CodeMap.Tests/CodeMap.Tests.csproj">
-    <Platform Solution="*|ARM64" Project="Any CPU" />
-    <Platform Solution="*|x64" Project="Any CPU" />
-    <Platform Solution="*|x86" Project="Any CPU" />
+  <Project Path="LayoutLib/LayoutLib.vcxproj" Id="1cd712e4-3445-49c4-bdec-18d407b4f1aa">
+    <Platform Solution="*|ARM64" Project="ARM64" />
+    <Platform Solution="*|x64" Project="x64" />
+    <Platform Solution="*|x86" Project="Win32" />
   </Project>
 </Solution>
