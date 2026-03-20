@@ -10,6 +10,9 @@ namespace CodeMap.Services;
 
 internal static partial class NativeLayoutService
 {
+    private static readonly object s_layoutCacheGate = new();
+    private static NativeLayoutCacheEntry? s_lastLayoutCacheEntry;
+
     static NativeLayoutService()
     {
         NativeLibrary.SetDllImportResolver(typeof(NativeLayoutService).Assembly, ResolveNativeLibrary);
@@ -40,6 +43,28 @@ internal static partial class NativeLayoutService
         ProjectAssembly = 10,
         ProjectDll = 11,
         Default = 12
+    }
+
+    private sealed class NativeLayoutCacheEntry(
+        int[] nodeKinds,
+        int[] labelLengths,
+        int[] ownerIndices,
+        int[] edgeSources,
+        int[] edgeTargets,
+        int[] edgeKinds,
+        int[] edgeWeights,
+        float[] x,
+        float[] y)
+    {
+        public int[] NodeKinds { get; } = nodeKinds;
+        public int[] LabelLengths { get; } = labelLengths;
+        public int[] OwnerIndices { get; } = ownerIndices;
+        public int[] EdgeSources { get; } = edgeSources;
+        public int[] EdgeTargets { get; } = edgeTargets;
+        public int[] EdgeKinds { get; } = edgeKinds;
+        public int[] EdgeWeights { get; } = edgeWeights;
+        public float[] X { get; } = x;
+        public float[] Y { get; } = y;
     }
 
     [LibraryImport("LayoutLib", EntryPoint = "ComputeCoseLayout", StringMarshalling = StringMarshalling.Utf16)]
@@ -89,10 +114,10 @@ internal static partial class NativeLayoutService
                 labelLengths[nodeIndex] = Math.Clamp(node.Label?.Length ?? 0, 0, 160);
             }
 
-            List<int> edgeSources = new(payload.Edges.Count);
-            List<int> edgeTargets = new(payload.Edges.Count);
-            List<int> edgeKinds = new(payload.Edges.Count);
-            List<int> edgeWeights = new(payload.Edges.Count);
+            List<int> edgeSourcesBuilder = new(payload.Edges.Count);
+            List<int> edgeTargetsBuilder = new(payload.Edges.Count);
+            List<int> edgeKindsBuilder = new(payload.Edges.Count);
+            List<int> edgeWeightsBuilder = new(payload.Edges.Count);
 
             foreach (GraphEdgePayload edge in payload.Edges)
             {
@@ -113,29 +138,61 @@ internal static partial class NativeLayoutService
                         break;
                 }
 
-                edgeSources.Add(sourceIndex);
-                edgeTargets.Add(targetIndex);
-                edgeKinds.Add((int)ResolveEdgeKind(edge.Kind));
-                edgeWeights.Add(Math.Max(1, edge.Weight));
+                edgeSourcesBuilder.Add(sourceIndex);
+                edgeTargetsBuilder.Add(targetIndex);
+                edgeKindsBuilder.Add((int)ResolveEdgeKind(edge.Kind));
+                edgeWeightsBuilder.Add(Math.Max(1, edge.Weight));
             }
 
+            int[] edgeSources = edgeSourcesBuilder.ToArray();
+            int[] edgeTargets = edgeTargetsBuilder.ToArray();
+            int[] edgeKinds = edgeKindsBuilder.ToArray();
+            int[] edgeWeights = edgeWeightsBuilder.ToArray();
             float[] x = new float[payload.Nodes.Count];
             float[] y = new float[payload.Nodes.Count];
-            if (ComputeCoseLayout(
+
+            if (TryRestoreCachedLayout(
+                nodeKinds,
+                labelLengths,
+                ownerIndices,
+                edgeSources,
+                edgeTargets,
+                edgeKinds,
+                edgeWeights,
+                x,
+                y))
+            {
+                elapsedMilliseconds = stopwatch.ElapsedMilliseconds;
+            }
+            else if (ComputeCoseLayout(
                 payload.Nodes.Count,
                 nodeKinds,
                 labelLengths,
                 ownerIndices,
-                edgeSources.Count,
-                edgeSources.ToArray(),
-                edgeTargets.ToArray(),
-                edgeKinds.ToArray(),
-                edgeWeights.ToArray(),
+                edgeSources.Length,
+                edgeSources,
+                edgeTargets,
+                edgeKinds,
+                edgeWeights,
                 x,
                 y) == 0)
             {
                 failureReason = "native-layout-returned-failure";
                 return false;
+            }
+            else
+            {
+                CacheLayout(
+                    nodeKinds,
+                    labelLengths,
+                    ownerIndices,
+                    edgeSources,
+                    edgeTargets,
+                    edgeKinds,
+                    edgeWeights,
+                    x,
+                    y);
+                elapsedMilliseconds = stopwatch.ElapsedMilliseconds;
             }
 
             List<GraphNodePayload> updatedNodes = new(payload.Nodes.Count);
@@ -148,8 +205,6 @@ internal static partial class NativeLayoutService
                     Y = y[nodeIndex]
                 });
             }
-
-            elapsedMilliseconds = stopwatch.ElapsedMilliseconds;
             updatedPayload = payload with { Nodes = updatedNodes };
             return true;
         }
@@ -172,6 +227,64 @@ internal static partial class NativeLayoutService
         {
             failureReason = ex.Message;
             return false;
+        }
+    }
+
+    private static bool TryRestoreCachedLayout(
+        int[] nodeKinds,
+        int[] labelLengths,
+        int[] ownerIndices,
+        int[] edgeSources,
+        int[] edgeTargets,
+        int[] edgeKinds,
+        int[] edgeWeights,
+        float[] x,
+        float[] y)
+    {
+        lock (s_layoutCacheGate)
+        {
+            NativeLayoutCacheEntry? cacheEntry = s_lastLayoutCacheEntry;
+            if (cacheEntry is null ||
+                !cacheEntry.NodeKinds.AsSpan().SequenceEqual(nodeKinds) ||
+                !cacheEntry.LabelLengths.AsSpan().SequenceEqual(labelLengths) ||
+                !cacheEntry.OwnerIndices.AsSpan().SequenceEqual(ownerIndices) ||
+                !cacheEntry.EdgeSources.AsSpan().SequenceEqual(edgeSources) ||
+                !cacheEntry.EdgeTargets.AsSpan().SequenceEqual(edgeTargets) ||
+                !cacheEntry.EdgeKinds.AsSpan().SequenceEqual(edgeKinds) ||
+                !cacheEntry.EdgeWeights.AsSpan().SequenceEqual(edgeWeights))
+            {
+                return false;
+            }
+
+            cacheEntry.X.AsSpan().CopyTo(x);
+            cacheEntry.Y.AsSpan().CopyTo(y);
+            return true;
+        }
+    }
+
+    private static void CacheLayout(
+        int[] nodeKinds,
+        int[] labelLengths,
+        int[] ownerIndices,
+        int[] edgeSources,
+        int[] edgeTargets,
+        int[] edgeKinds,
+        int[] edgeWeights,
+        float[] x,
+        float[] y)
+    {
+        lock (s_layoutCacheGate)
+        {
+            s_lastLayoutCacheEntry = new NativeLayoutCacheEntry(
+                (int[])nodeKinds.Clone(),
+                (int[])labelLengths.Clone(),
+                (int[])ownerIndices.Clone(),
+                (int[])edgeSources.Clone(),
+                (int[])edgeTargets.Clone(),
+                (int[])edgeKinds.Clone(),
+                (int[])edgeWeights.Clone(),
+                (float[])x.Clone(),
+                (float[])y.Clone());
         }
     }
 

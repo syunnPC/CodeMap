@@ -11,77 +11,37 @@ public sealed partial class SqliteSnapshotStore
     private static Dictionary<string, List<CachedDocumentRecord>> BuildDocumentsByProject(
         IReadOnlyList<CachedDocumentRecord> documentRecords)
     {
-        Dictionary<string, List<CachedDocumentRecord>> documentsByProject = new(StringComparer.Ordinal);
-        foreach (CachedDocumentRecord record in documentRecords)
-        {
-            if (!documentsByProject.TryGetValue(record.ProjectKey, out List<CachedDocumentRecord>? projectDocuments))
-            {
-                projectDocuments = [];
-                documentsByProject.Add(record.ProjectKey, projectDocuments);
-            }
-
-            projectDocuments.Add(record);
-        }
-
-        foreach (List<CachedDocumentRecord> projectDocuments in documentsByProject.Values)
-        {
-            projectDocuments.Sort(static (left, right) =>
+        return BuildLookup(
+            documentRecords,
+            static record => record.ProjectKey,
+            static projectDocuments => projectDocuments.Sort(static (left, right) =>
             {
                 int nameCompare = StringComparer.OrdinalIgnoreCase.Compare(left.DocumentName, right.DocumentName);
                 return nameCompare != 0
                     ? nameCompare
                     : StringComparer.OrdinalIgnoreCase.Compare(left.DocumentFilePath, right.DocumentFilePath);
-            });
-        }
-
-        return documentsByProject;
+            }));
     }
 
     private static Dictionary<string, List<CachedSymbolRecord>> BuildSymbolsByDocumentId(
         IReadOnlyList<CachedSymbolRecord> symbolRecords)
     {
-        Dictionary<string, List<CachedSymbolRecord>> symbolsByDocumentId = new(StringComparer.Ordinal);
-        foreach (CachedSymbolRecord record in symbolRecords)
-        {
-            if (!symbolsByDocumentId.TryGetValue(record.DocumentId, out List<CachedSymbolRecord>? documentSymbols))
-            {
-                documentSymbols = [];
-                symbolsByDocumentId.Add(record.DocumentId, documentSymbols);
-            }
-
-            documentSymbols.Add(record);
-        }
-
-        foreach (List<CachedSymbolRecord> documentSymbols in symbolsByDocumentId.Values)
-        {
-            documentSymbols.Sort(static (left, right) =>
+        return BuildLookup(
+            symbolRecords,
+            static record => record.DocumentId,
+            static documentSymbols => documentSymbols.Sort(static (left, right) =>
             {
                 int lineCompare = left.LineNumber.CompareTo(right.LineNumber);
                 return lineCompare != 0
                     ? lineCompare
                     : StringComparer.OrdinalIgnoreCase.Compare(left.SymbolDisplayName, right.SymbolDisplayName);
-            });
-        }
-
-        return symbolsByDocumentId;
+            }));
     }
 
     private static Dictionary<string, List<CachedDependencyRecord>> BuildDependenciesByProject(
         IReadOnlyList<CachedDependencyRecord> dependencyRecords)
     {
-        Dictionary<string, List<CachedDependencyRecord>> dependenciesByProject = new(StringComparer.Ordinal);
-        foreach (CachedDependencyRecord record in dependencyRecords)
-        {
-            if (!dependenciesByProject.TryGetValue(record.ProjectKey, out List<CachedDependencyRecord>? projectDependencies))
-            {
-                projectDependencies = [];
-                dependenciesByProject.Add(record.ProjectKey, projectDependencies);
-            }
-
-            projectDependencies.Add(record);
-        }
-
-        return dependenciesByProject;
+        return BuildLookup(dependencyRecords, static record => record.ProjectKey);
     }
 
     private static IReadOnlyList<ProjectReferenceSummary> BuildProjectReferences(
@@ -247,5 +207,36 @@ public sealed partial class SqliteSnapshotStore
         return string.IsNullOrWhiteSpace(fileName)
             ? targetProjectKey
             : fileName;
+    }
+
+    private static Dictionary<string, List<TRecord>> BuildLookup<TRecord>(
+        IReadOnlyList<TRecord> records,
+        Func<TRecord, string> keySelector,
+        Action<List<TRecord>>? sort = null)
+    {
+        Dictionary<string, List<TRecord>> lookup = new(StringComparer.Ordinal);
+        foreach (TRecord record in records)
+        {
+            string key = keySelector(record);
+            if (!lookup.TryGetValue(key, out List<TRecord>? values))
+            {
+                values = [];
+                lookup.Add(key, values);
+            }
+
+            values.Add(record);
+        }
+
+        if (sort is null)
+        {
+            return lookup;
+        }
+
+        foreach (List<TRecord> values in lookup.Values)
+        {
+            sort(values);
+        }
+
+        return lookup;
     }
 }

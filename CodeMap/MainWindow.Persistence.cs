@@ -11,6 +11,38 @@ namespace CodeMap;
 
 public sealed partial class MainWindow
 {
+    private sealed class JsonFileWriteCoordinator
+    {
+        private long _latestVersion;
+        private readonly SemaphoreSlim _gate = new(1, 1);
+
+        public long AdvanceVersion()
+        {
+            return Interlocked.Increment(ref _latestVersion);
+        }
+
+        public long CurrentVersion => Interlocked.Read(ref _latestVersion);
+
+        public Task WaitAsync(CancellationToken cancellationToken)
+        {
+            return _gate.WaitAsync(cancellationToken);
+        }
+
+        public void Wait()
+        {
+            _gate.Wait();
+        }
+
+        public void Release()
+        {
+            _gate.Release();
+        }
+    }
+
+    private readonly JsonFileWriteCoordinator _appPreferencesSaveCoordinator = new();
+    private readonly JsonFileWriteCoordinator _recentSolutionsSaveCoordinator = new();
+    private readonly JsonFileWriteCoordinator _solutionViewStatesSaveCoordinator = new();
+
     private static string? DiscoverDefaultSolutionPath()
     {
         DirectoryInfo? cursor = new(Environment.CurrentDirectory);
@@ -83,6 +115,7 @@ public sealed partial class MainWindow
             StringComparer.OrdinalIgnoreCase);
         ScheduleJsonFileWrite(
             ref _solutionViewStatesSaveCancellationTokenSource,
+            _solutionViewStatesSaveCoordinator,
             s_solutionViewStatesFilePath,
             snapshot,
             T("diag.persistence.solutionViewStateSaveFailed"),
@@ -139,6 +172,7 @@ public sealed partial class MainWindow
 
         ScheduleJsonFileWrite(
             ref _recentSolutionsSaveCancellationTokenSource,
+            _recentSolutionsSaveCoordinator,
             s_recentSolutionsFilePath,
             snapshot,
             T("diag.persistence.recentWorkspaceSaveFailed"),
@@ -158,6 +192,7 @@ public sealed partial class MainWindow
 
     private void ScheduleJsonFileWrite<T>(
         ref CancellationTokenSource? cancellationTokenSource,
+        JsonFileWriteCoordinator coordinator,
         string filePath,
         T value,
         string failureMessage,
@@ -165,10 +200,18 @@ public sealed partial class MainWindow
     {
         try
         {
+            long scheduledVersion = coordinator.AdvanceVersion();
             CancellationTokenSource next = new();
             CancellationTokenSource? previous = Interlocked.Exchange(ref cancellationTokenSource, next);
             RequestCancellation(previous);
-            _ = PersistJsonFileAsync(filePath, value, failureMessage, next, clearSaveTokenSource);
+            _ = PersistJsonFileAsync(
+                filePath,
+                value,
+                failureMessage,
+                next,
+                clearSaveTokenSource,
+                coordinator,
+                scheduledVersion);
         }
         catch (Exception ex)
         {
@@ -181,16 +224,28 @@ public sealed partial class MainWindow
         T value,
         string failureMessage,
         CancellationTokenSource cancellationTokenSource,
-        Action<CancellationTokenSource> clearSaveTokenSource)
+        Action<CancellationTokenSource> clearSaveTokenSource,
+        JsonFileWriteCoordinator coordinator,
+        long scheduledVersion)
     {
         try
         {
             await Task.Delay(JsonFileWriteDebounceMilliseconds, cancellationTokenSource.Token).ConfigureAwait(false);
+            if (cancellationTokenSource.IsCancellationRequested || scheduledVersion != coordinator.CurrentVersion)
+            {
+                return;
+            }
+
             string json = JsonSerializer.Serialize(
                 value,
                 typeof(T),
                 CodeMapJsonSerializerContext.Default);
-            await WriteTextFileAtomicallyAsync(filePath, json, cancellationTokenSource.Token).ConfigureAwait(false);
+            await WriteTextFileAtomicallyAsync(
+                filePath,
+                json,
+                cancellationTokenSource.Token,
+                coordinator,
+                scheduledVersion).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -224,15 +279,34 @@ public sealed partial class MainWindow
         Interlocked.CompareExchange(ref _solutionViewStatesSaveCancellationTokenSource, null, cancellationTokenSource);
     }
 
-    private static async Task WriteTextFileAtomicallyAsync(string filePath, string content, CancellationToken cancellationToken)
+    private static async Task WriteTextFileAtomicallyAsync(
+        string filePath,
+        string content,
+        CancellationToken cancellationToken,
+        JsonFileWriteCoordinator coordinator,
+        long scheduledVersion)
     {
         try
         {
-            await WriteTextFileAtomicallyCoreAsync(
-                filePath,
-                content,
-                cancellationToken,
-                static (path, text, token) => File.WriteAllTextAsync(path, text, token)).ConfigureAwait(false);
+            await coordinator.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (scheduledVersion != coordinator.CurrentVersion)
+                {
+                    return;
+                }
+
+                await WriteTextFileAtomicallyCoreAsync(
+                    filePath,
+                    content,
+                    cancellationToken,
+                    static (path, text, token) => File.WriteAllTextAsync(path, text, token)).ConfigureAwait(false);
+            }
+            finally
+            {
+                coordinator.Release();
+            }
         }
         catch (OperationCanceledException)
         {
@@ -246,6 +320,7 @@ public sealed partial class MainWindow
 
     private void SaveRecentSolutionsImmediately()
     {
+        long scheduledVersion = _recentSolutionsSaveCoordinator.AdvanceVersion();
         CancelPendingSave(ref _recentSolutionsSaveCancellationTokenSource);
         string[] snapshot = _recentSolutions
             .Select(NormalizeSolutionPath)
@@ -253,20 +328,36 @@ public sealed partial class MainWindow
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Take(MaxRecentSolutions)
             .ToArray();
-        WriteJsonFileImmediately(s_recentSolutionsFilePath, snapshot, T("diag.persistence.recentWorkspaceSaveFailed"));
+        WriteJsonFileImmediately(
+            s_recentSolutionsFilePath,
+            snapshot,
+            T("diag.persistence.recentWorkspaceSaveFailed"),
+            _recentSolutionsSaveCoordinator,
+            scheduledVersion);
     }
 
     private void SaveSolutionViewStatesImmediately()
     {
+        long scheduledVersion = _solutionViewStatesSaveCoordinator.AdvanceVersion();
         CancelPendingSave(ref _solutionViewStatesSaveCancellationTokenSource);
         Dictionary<string, SolutionViewState> snapshot = _solutionViewStates.ToDictionary(
             entry => entry.Key,
             entry => NormalizeSolutionViewState(entry.Value),
             StringComparer.OrdinalIgnoreCase);
-        WriteJsonFileImmediately(s_solutionViewStatesFilePath, snapshot, T("diag.persistence.solutionViewStateSaveFailed"));
+        WriteJsonFileImmediately(
+            s_solutionViewStatesFilePath,
+            snapshot,
+            T("diag.persistence.solutionViewStateSaveFailed"),
+            _solutionViewStatesSaveCoordinator,
+            scheduledVersion);
     }
 
-    private void WriteJsonFileImmediately<T>(string filePath, T value, string failureMessage)
+    private void WriteJsonFileImmediately<T>(
+        string filePath,
+        T value,
+        string failureMessage,
+        JsonFileWriteCoordinator coordinator,
+        long scheduledVersion)
     {
         try
         {
@@ -274,7 +365,7 @@ public sealed partial class MainWindow
                 value,
                 typeof(T),
                 CodeMapJsonSerializerContext.Default);
-            WriteTextFileAtomically(filePath, json);
+            WriteTextFileAtomically(filePath, json, coordinator, scheduledVersion);
         }
         catch (Exception ex)
         {
@@ -282,21 +373,38 @@ public sealed partial class MainWindow
         }
     }
 
-    private static void WriteTextFileAtomically(string filePath, string content)
+    private static void WriteTextFileAtomically(
+        string filePath,
+        string content,
+        JsonFileWriteCoordinator coordinator,
+        long scheduledVersion)
     {
         try
         {
-            WriteTextFileAtomicallyCoreAsync(
-                    filePath,
-                    content,
-                    CancellationToken.None,
-                    static (path, text, _) =>
-                    {
-                        File.WriteAllText(path, text);
-                        return Task.CompletedTask;
-                    })
-                .GetAwaiter()
-                .GetResult();
+            coordinator.Wait();
+            try
+            {
+                if (scheduledVersion != coordinator.CurrentVersion)
+                {
+                    return;
+                }
+
+                WriteTextFileAtomicallyCoreAsync(
+                        filePath,
+                        content,
+                        CancellationToken.None,
+                        static (path, text, _) =>
+                        {
+                            File.WriteAllText(path, text);
+                            return Task.CompletedTask;
+                        })
+                    .GetAwaiter()
+                    .GetResult();
+            }
+            finally
+            {
+                coordinator.Release();
+            }
         }
         catch (Exception ex)
         {

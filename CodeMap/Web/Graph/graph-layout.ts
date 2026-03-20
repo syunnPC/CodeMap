@@ -653,6 +653,16 @@ interface OverlapSeparationOptions {
   rowGap: number | ((nodeCount: number) => number);
 }
 
+interface VisibleBBoxEntry {
+  node: any;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  posX: number;
+  posY: number;
+}
+
 function separateOverlappingNodes(options: OverlapSeparationOptions): void {
   if (!state.cy) {
     return;
@@ -776,47 +786,66 @@ function separateVisibleBoundingBoxOverlaps(maxPasses = 3): void {
 
   let movedAny = false;
   for (let pass = 0; pass < maxPasses; pass += 1) {
-    const orderedNodes = nodes
-      .slice()
-      .sort((left: any, right: any) => left.boundingBox({ includeLabels: true }).x1 - right.boundingBox({ includeLabels: true }).x1);
+    const orderedNodes: VisibleBBoxEntry[] = nodes
+      .map((node: any) => {
+        const box = node.boundingBox({ includeLabels: true });
+        const position = node.position();
+        return {
+          node,
+          x1: Number(box.x1 ?? 0),
+          y1: Number(box.y1 ?? 0),
+          x2: Number(box.x2 ?? 0),
+          y2: Number(box.y2 ?? 0),
+          posX: Number(position.x ?? 0),
+          posY: Number(position.y ?? 0)
+        };
+      })
+      .sort((left: VisibleBBoxEntry, right: VisibleBBoxEntry) => left.x1 - right.x1);
     let movedThisPass = false;
 
     state.cy.startBatch();
     for (let i = 0; i < orderedNodes.length; i += 1) {
       const left = orderedNodes[i];
-      const leftBox = left.boundingBox({ includeLabels: true });
       for (let j = i + 1; j < orderedNodes.length; j += 1) {
         const right = orderedNodes[j];
-        const rightBox = right.boundingBox({ includeLabels: true });
-        if (rightBox.x1 > leftBox.x2 + 24) {
+        if (right.x1 > left.x2 + 28) {
           break;
         }
 
-        const overlapX = Math.min(leftBox.x2, rightBox.x2) - Math.max(leftBox.x1, rightBox.x1);
-        const overlapY = Math.min(leftBox.y2, rightBox.y2) - Math.max(leftBox.y1, rightBox.y1);
+        const overlapX = Math.min(left.x2, right.x2) - Math.max(left.x1, right.x1);
+        const overlapY = Math.min(left.y2, right.y2) - Math.max(left.y1, right.y1);
         if (overlapX <= 0 || overlapY <= 0) {
           continue;
         }
 
         movedThisPass = true;
         movedAny = true;
-
-        const leftPos = left.position();
-        const rightPos = right.position();
-        const dx = Number(rightPos.x ?? 0) - Number(leftPos.x ?? 0);
-        const dy = Number(rightPos.y ?? 0) - Number(leftPos.y ?? 0);
+        const dx = right.posX - left.posX;
+        const dy = right.posY - left.posY;
 
         if (overlapX <= overlapY * 1.2) {
-          const delta = overlapX / 2 + 12;
+          const delta = overlapX / 2 + 16;
           const direction = dx >= 0 ? 1 : -1;
-          positionNodePreservingLock(left, Number(leftPos.x ?? 0) - delta * direction, Number(leftPos.y ?? 0));
-          positionNodePreservingLock(right, Number(rightPos.x ?? 0) + delta * direction, Number(rightPos.y ?? 0));
+          positionNodePreservingLock(left.node, left.posX - delta * direction, left.posY);
+          positionNodePreservingLock(right.node, right.posX + delta * direction, right.posY);
+          left.posX -= delta * direction;
+          left.x1 -= delta * direction;
+          left.x2 -= delta * direction;
+          right.posX += delta * direction;
+          right.x1 += delta * direction;
+          right.x2 += delta * direction;
         }
         else {
-          const delta = overlapY / 2 + 10;
+          const delta = overlapY / 2 + 12;
           const direction = dy >= 0 ? 1 : -1;
-          positionNodePreservingLock(left, Number(leftPos.x ?? 0), Number(leftPos.y ?? 0) - delta * direction);
-          positionNodePreservingLock(right, Number(rightPos.x ?? 0), Number(rightPos.y ?? 0) + delta * direction);
+          positionNodePreservingLock(left.node, left.posX, left.posY - delta * direction);
+          positionNodePreservingLock(right.node, right.posX, right.posY + delta * direction);
+          left.posY -= delta * direction;
+          left.y1 -= delta * direction;
+          left.y2 -= delta * direction;
+          right.posY += delta * direction;
+          right.y1 += delta * direction;
+          right.y2 += delta * direction;
         }
       }
     }
@@ -827,19 +856,145 @@ function separateVisibleBoundingBoxOverlaps(maxPasses = 3): void {
     }
   }
 
+  if (relaxVisibleBoundingBoxClusters()) {
+    movedAny = true;
+  }
+
   if (movedAny) {
     forceGraphRender();
   }
 }
 
+function relaxVisibleBoundingBoxClusters(maxPasses = 4): boolean {
+  if (!state.cy) {
+    return false;
+  }
+
+  const nodes = state.cy
+    .nodes()
+    .not(".state-hidden")
+    .not(".filtered-out")
+    .not(".pinned")
+    .toArray();
+  if (nodes.length < 2) {
+    return false;
+  }
+
+  let movedAny = false;
+  const cellSize = nodes.length >= 1800 ? 164 : 188;
+  const maxStep = nodes.length >= 1800 ? 28 : 36;
+  for (let pass = 0; pass < maxPasses; pass += 1) {
+    const entries: VisibleBBoxEntry[] = nodes.map((node: any) => {
+      const box = node.boundingBox({ includeLabels: true });
+      const position = node.position();
+      return {
+        node,
+        x1: Number(box.x1 ?? 0),
+        y1: Number(box.y1 ?? 0),
+        x2: Number(box.x2 ?? 0),
+        y2: Number(box.y2 ?? 0),
+        posX: Number(position.x ?? 0),
+        posY: Number(position.y ?? 0)
+      };
+    });
+    const buckets = new Map<string, number[]>();
+    for (let index = 0; index < entries.length; index += 1) {
+      const entry = entries[index];
+      const minCellX = Math.floor(entry.x1 / cellSize);
+      const maxCellX = Math.floor(entry.x2 / cellSize);
+      const minCellY = Math.floor(entry.y1 / cellSize);
+      const maxCellY = Math.floor(entry.y2 / cellSize);
+      for (let cellX = minCellX; cellX <= maxCellX; cellX += 1) {
+        for (let cellY = minCellY; cellY <= maxCellY; cellY += 1) {
+          const key = `${cellX}:${cellY}`;
+          const bucket = buckets.get(key);
+          if (bucket) {
+            bucket.push(index);
+          }
+          else {
+            buckets.set(key, [index]);
+          }
+        }
+      }
+    }
+
+    const dxByIndex = new Array<number>(entries.length).fill(0);
+    const dyByIndex = new Array<number>(entries.length).fill(0);
+    const seenPairs = new Set<string>();
+    let movedThisPass = false;
+
+    for (const bucket of buckets.values()) {
+      for (let leftIndex = 0; leftIndex < bucket.length; leftIndex += 1) {
+        const leftEntryIndex = bucket[leftIndex];
+        const left = entries[leftEntryIndex];
+        for (let rightIndex = leftIndex + 1; rightIndex < bucket.length; rightIndex += 1) {
+          const rightEntryIndex = bucket[rightIndex];
+          const pairKey = leftEntryIndex < rightEntryIndex
+            ? `${leftEntryIndex}:${rightEntryIndex}`
+            : `${rightEntryIndex}:${leftEntryIndex}`;
+          if (seenPairs.has(pairKey)) {
+            continue;
+          }
+
+          seenPairs.add(pairKey);
+          const right = entries[rightEntryIndex];
+          const overlapX = Math.min(left.x2, right.x2) - Math.max(left.x1, right.x1);
+          const overlapY = Math.min(left.y2, right.y2) - Math.max(left.y1, right.y1);
+          if (overlapX <= 0 || overlapY <= 0) {
+            continue;
+          }
+
+          movedThisPass = true;
+          const dx = right.posX - left.posX;
+          const dy = right.posY - left.posY;
+          if (overlapX <= overlapY * 1.15) {
+            const delta = Math.min(maxStep, overlapX / 2 + 10);
+            const direction = dx >= 0 ? 1 : -1;
+            dxByIndex[leftEntryIndex] -= delta * direction;
+            dxByIndex[rightEntryIndex] += delta * direction;
+          }
+          else {
+            const delta = Math.min(maxStep, overlapY / 2 + 8);
+            const direction = dy >= 0 ? 1 : -1;
+            dyByIndex[leftEntryIndex] -= delta * direction;
+            dyByIndex[rightEntryIndex] += delta * direction;
+          }
+        }
+      }
+    }
+
+    if (!movedThisPass) {
+      break;
+    }
+
+    movedAny = true;
+    state.cy.startBatch();
+    for (let index = 0; index < entries.length; index += 1) {
+      const moveX = Math.max(-maxStep, Math.min(maxStep, dxByIndex[index]));
+      const moveY = Math.max(-maxStep, Math.min(maxStep, dyByIndex[index]));
+      if (Math.abs(moveX) < 0.5 && Math.abs(moveY) < 0.5) {
+        continue;
+      }
+
+      positionNodePreservingLock(entries[index].node, entries[index].posX + moveX, entries[index].posY + moveY);
+    }
+    state.cy.endBatch();
+  }
+
+  return movedAny;
+}
+
 function separateOverlappingNodeCollisions(): void {
   if (state.lastPayload && payloadHasPresetPositions(state.lastPayload)) {
-    const passCount = state.cy && state.cy.nodes().length >= 1800 ? 2 : 4;
+    const passCount = state.cy && state.cy.nodes().length >= 1800 ? 4 : 6;
     separateVisibleBoundingBoxOverlaps(passCount);
   }
   separateOverlappingExternalDependencyNodes();
   separateOverlappingCollapsedNodes();
   separateOverlappingDocumentNodes();
+  if (state.lastPayload && payloadHasPresetPositions(state.lastPayload)) {
+    separateVisibleBoundingBoxOverlaps(2);
+  }
 }
 
 function separateOverlappingHighLevelNodes(): void {

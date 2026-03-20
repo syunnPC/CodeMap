@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -65,6 +66,88 @@ public sealed class CppAnalysisServiceTests
         DocumentAnalysisSummary document = Assert.Single(project.Summary.Documents);
         Assert.Equal(Path.GetFullPath(sourceFilePath), Path.GetFullPath(document.FilePath ?? string.Empty), ignoreCase: true);
         Assert.False(string.IsNullOrWhiteSpace(document.Id));
+    }
+
+    [Fact]
+    public void LoadProjectDocuments_ResolvesImportChainUsingEarlierImportedProperties()
+    {
+        using TemporaryWorkspace workspace = new();
+        string propsDirectory = Path.Combine(workspace.RootPath, "props");
+        Directory.CreateDirectory(propsDirectory);
+
+        string projectPath = Path.Combine(workspace.RootPath, "sample.vcxproj");
+        string firstImportPath = Path.Combine(workspace.RootPath, "A.props");
+        string secondImportPath = Path.Combine(propsDirectory, "bar.props");
+
+        File.WriteAllText(
+            projectPath,
+            """
+            <Project>
+              <Import Project="A.props" />
+            </Project>
+            """);
+        File.WriteAllText(
+            firstImportPath,
+            """
+            <Project>
+              <PropertyGroup>
+                <FooDir>props</FooDir>
+              </PropertyGroup>
+              <Import Project="$(FooDir)\bar.props" />
+            </Project>
+            """);
+        File.WriteAllText(secondImportPath, "<Project />");
+
+        IReadOnlyList<string> documents = CppAnalysisService.TestLoadProjectDocumentPaths(projectPath, workspace.RootPath);
+
+        Assert.Contains(documents, document => string.Equals(
+            document,
+            Path.GetFullPath(firstImportPath),
+            StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(documents, document => string.Equals(
+            document,
+            Path.GetFullPath(secondImportPath),
+            StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Theory]
+    [InlineData("$(MissingProp)")]
+    [InlineData("'$(MissingProp)' != ''")]
+    public void EvaluateMsBuildCondition_UndefinedPropertiesAreFalsey(string condition)
+    {
+        using TemporaryWorkspace workspace = new();
+        string projectPath = Path.Combine(workspace.RootPath, "sample.vcxproj");
+        File.WriteAllText(projectPath, "<Project />");
+
+        bool result = CppAnalysisService.TestEvaluateMsBuildCondition(condition, projectPath, workspace.RootPath);
+
+        Assert.False(result);
+    }
+
+    [Fact]
+    public void CreateEvaluationContext_StandaloneProjectDoesNotDefineSolutionProperties()
+    {
+        using TemporaryWorkspace workspace = new();
+        string projectPath = Path.Combine(workspace.RootPath, "sample.vcxproj");
+        File.WriteAllText(projectPath, "<Project />");
+
+        bool hasSolutionDir = CppAnalysisService.TestTryResolveEvaluationProperty(
+            projectPath,
+            workspace.RootPath,
+            "SolutionDir",
+            out string? solutionDir,
+            solutionPath: null);
+        bool hasSolutionPath = CppAnalysisService.TestTryResolveEvaluationProperty(
+            projectPath,
+            workspace.RootPath,
+            "SolutionPath",
+            out string? solutionPath,
+            solutionPath: null);
+
+        Assert.False(hasSolutionDir);
+        Assert.False(hasSolutionPath);
+        Assert.Null(solutionDir);
+        Assert.Null(solutionPath);
     }
 
     private sealed class TemporaryWorkspace : IDisposable

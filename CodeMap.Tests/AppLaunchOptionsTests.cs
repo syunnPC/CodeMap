@@ -48,6 +48,38 @@ public sealed class AppLaunchOptionsTests
         Assert.Equal(GetDefaultConsoleDebugging(), AppLaunchOptions.Current.EnableConsoleDebugging);
     }
 
+    [Theory]
+    [InlineData("--enable-performance-metrics=true", true, true)]
+    [InlineData("--enable-performance-metrics=off", false, true)]
+    [InlineData("--enable-native-layout=false", false, false)]
+    [InlineData("--enable-native-layout=1", false, true)]
+    public void Initialize_ParsesAdditionalBooleanFlags(
+        string argument,
+        bool expectedPerformanceMetrics,
+        bool expectedNativeLayout)
+    {
+        AppLaunchOptions.Initialize([argument]);
+
+        Assert.Equal(expectedPerformanceMetrics, AppLaunchOptions.Current.EnablePerformanceMetrics);
+        Assert.Equal(expectedNativeLayout, AppLaunchOptions.Current.EnableNativeLayout);
+    }
+
+    [Fact]
+    public void Initialize_MixedBooleanFlags_LastValidValueWinsPerOption()
+    {
+        AppLaunchOptions.Initialize(
+        [
+            "--enable-performance-metrics=true",
+            "--enable-native-layout=false",
+            "--enable-performance-metrics=invalid",
+            "--enable-performance-metrics=off",
+            "--enable-native-layout=on"
+        ]);
+
+        Assert.False(AppLaunchOptions.Current.EnablePerformanceMetrics);
+        Assert.True(AppLaunchOptions.Current.EnableNativeLayout);
+    }
+
     private static bool GetDefaultConsoleDebugging()
     {
 #if DEBUG

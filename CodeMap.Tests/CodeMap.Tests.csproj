@@ -37,6 +37,7 @@
     <Compile Include="..\CodeMap\AppLocalization.cs" Link="CodeMap\AppLocalization.cs" />
     <Compile Include="..\CodeMap\AppLaunchOptions.cs" Link="CodeMap\AppLaunchOptions.cs" />
     <Compile Include="..\CodeMap\AppPreferences.cs" Link="CodeMap\AppPreferences.cs" />
+    <Compile Include="..\CodeMap\PathNormalization.cs" Link="CodeMap\PathNormalization.cs" />
     <Compile Include="..\CodeMap\Storage\SnapshotPersistenceResult.cs" Link="CodeMap\Storage\SnapshotPersistenceResult.cs" />
     <Compile Include="..\CodeMap\Storage\SqliteSnapshotStore.Hydration.cs" Link="CodeMap\Storage\SqliteSnapshotStore.Hydration.cs" />
     <Compile Include="..\CodeMap\Storage\SqliteSnapshotStore.cs" Link="CodeMap\Storage\SqliteSnapshotStore.cs" />

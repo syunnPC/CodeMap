@@ -19,25 +19,28 @@ internal sealed record AppLaunchOptions(bool EnableConsoleDebugging, bool Enable
     {
         bool enableConsoleDebugging = GetDefaultConsoleDebugging();
         bool enablePerformanceMetrics = false;
-        bool enableNativeLayout = false;
+        bool enableNativeLayout = true;
 
         if (args is not null)
         {
             foreach (string argument in args)
             {
-                if (TryParseBooleanOption(argument, EnableConsoleDebuggingOptionName, out bool parsedValue))
+                if (!TryParseBooleanOption(argument, out string optionName, out bool parsedValue))
                 {
-                    enableConsoleDebugging = parsedValue;
+                    continue;
                 }
 
-                if (TryParseBooleanOption(argument, EnablePerformanceMetricsOptionName, out parsedValue))
+                switch (optionName)
                 {
-                    enablePerformanceMetrics = parsedValue;
-                }
-
-                if (TryParseBooleanOption(argument, EnableNativeLayoutOptionName, out parsedValue))
-                {
-                    enableNativeLayout = parsedValue;
+                    case EnableConsoleDebuggingOptionName:
+                        enableConsoleDebugging = parsedValue;
+                        break;
+                    case EnablePerformanceMetricsOptionName:
+                        enablePerformanceMetrics = parsedValue;
+                        break;
+                    case EnableNativeLayoutOptionName:
+                        enableNativeLayout = parsedValue;
+                        break;
                 }
             }
         }
@@ -45,21 +48,29 @@ internal sealed record AppLaunchOptions(bool EnableConsoleDebugging, bool Enable
         return new AppLaunchOptions(enableConsoleDebugging, enablePerformanceMetrics, enableNativeLayout);
     }
 
-    private static bool TryParseBooleanOption(string? argument, string optionName, out bool value)
+    private static bool TryParseBooleanOption(string? argument, out string optionName, out bool value)
     {
+        optionName = string.Empty;
         value = false;
         if (string.IsNullOrWhiteSpace(argument))
         {
             return false;
         }
 
-        string prefix = $"--{optionName}=";
-        if (!argument.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        string trimmedArgument = argument.Trim();
+        if (!trimmedArgument.StartsWith("--", StringComparison.Ordinal))
         {
             return false;
         }
 
-        string rawValue = argument[prefix.Length..].Trim();
+        int separatorIndex = trimmedArgument.IndexOf('=');
+        if (separatorIndex <= 2 || separatorIndex == trimmedArgument.Length - 1)
+        {
+            return false;
+        }
+
+        optionName = trimmedArgument[2..separatorIndex].Trim().ToLowerInvariant();
+        string rawValue = trimmedArgument[(separatorIndex + 1)..].Trim();
         return TryParseBooleanToken(rawValue, out value);
     }
 
@@ -74,7 +85,7 @@ internal sealed record AppLaunchOptions(bool EnableConsoleDebugging, bool Enable
 
     private static AppLaunchOptions CreateDefault()
     {
-        return new AppLaunchOptions(GetDefaultConsoleDebugging(), false, false);
+        return new AppLaunchOptions(GetDefaultConsoleDebugging(), false, true);
     }
 
     private static bool TryParseBooleanToken(string rawValue, out bool value)

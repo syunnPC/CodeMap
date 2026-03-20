@@ -1620,7 +1620,7 @@ function rebuildGraphFromPayload(performanceSample: GraphRenderPerformanceSample
     performanceSample.cyRebuildMs = performance.now() - cyRebuildStartedAt;
   }
 
-  applyBaseVisibilityClasses();
+  const initialVisibilityMetrics = applyBaseVisibilityClasses();
   if (hasPresetPositions) {
     if (performanceSample) {
       performanceSample.layoutName = "host-native-preset";
@@ -1636,7 +1636,12 @@ function rebuildGraphFromPayload(performanceSample: GraphRenderPerformanceSample
     performanceSample.pinnedMs = performance.now() - pinnedNodesStartedAt;
   }
 
-  applyGraphVisibilityFromState({ fitViewport: true, finalizeLayout: hasPresetPositions, performanceSample });
+  applyGraphVisibilityFromState({
+    fitViewport: true,
+    finalizeLayout: hasPresetPositions,
+    precomputedVisibilityMetrics: initialVisibilityMetrics,
+    performanceSample
+  });
   if (performanceSample && !performanceSample.awaitingAsyncLayout) {
     performanceSample.totalMs = performance.now() - performanceSample.startedAt;
     if (performanceSample.totalUntilLayoutStopMs === null) {
@@ -1659,6 +1664,7 @@ function applyGraphVisibilityFromState(options: {
   finalizeLayout?: boolean;
   relayoutOnExpand?: boolean;
   previousVisibleNodeIds?: ReadonlySet<string> | null;
+  precomputedVisibilityMetrics?: VisibilityUpdateMetrics | null;
   performanceSample?: GraphRenderPerformanceSample | null;
 }): void {
   if (!state.cy) {
@@ -1666,10 +1672,15 @@ function applyGraphVisibilityFromState(options: {
   }
 
   const applyStateStartedAt = performance.now();
-  const visibilityStartedAt = performance.now();
-  const visibilityMetrics = applyBaseVisibilityClasses();
+  let visibilityMetrics = options.precomputedVisibilityMetrics ?? null;
+  let visibilityElapsedMs = 0;
+  if (!visibilityMetrics) {
+    const visibilityStartedAt = performance.now();
+    visibilityMetrics = applyBaseVisibilityClasses();
+    visibilityElapsedMs = performance.now() - visibilityStartedAt;
+  }
   if (options.performanceSample) {
-    options.performanceSample.visibilityMs = performance.now() - visibilityStartedAt;
+    options.performanceSample.visibilityMs = visibilityElapsedMs;
     options.performanceSample.visibleNodeCount = visibilityMetrics.visibleNodeCount;
     options.performanceSample.visibleEdgeCount = visibilityMetrics.visibleEdgeCount;
   }
@@ -2038,28 +2049,7 @@ function resolveNodeForFocus(request: FocusNodeRequest): any {
     return null;
   }
 
-  const directMatch = state.cy.getElementById(request.nodeId);
-  if (!directMatch.empty()) {
-    return directMatch;
-  }
-
-  if (!request.label) {
-    return directMatch;
-  }
-
-  const exactMatches = state.cy.nodes().filter((node: any) => String(node.data("label") ?? "") === request.label);
-  if (exactMatches.length > 0) {
-    return exactMatches[0];
-  }
-
-  const prefixMatches = state.cy
-    .nodes()
-    .filter((node: any) => String(node.data("label") ?? "").startsWith(`${request.label}:`));
-  if (prefixMatches.length > 0) {
-    return prefixMatches[0];
-  }
-
-  return directMatch;
+  return state.cy.getElementById(request.nodeId);
 }
 
 function ensureNodeVisibilityForFocus(nodeId: string, label?: string): boolean {
@@ -2129,16 +2119,7 @@ function resolveNodePayloadForFocus(nodeId: string, label?: string): GraphNodePa
     return byId;
   }
 
-  if (!label) {
-    return undefined;
-  }
-
-  const byExactLabel = payloadNodes.find((candidate) => candidate.label === label);
-  if (byExactLabel) {
-    return byExactLabel;
-  }
-
-  return payloadNodes.find((candidate) => candidate.label.startsWith(`${label}:`));
+  return undefined;
 }
 
 function setToggleState(
@@ -2532,6 +2513,7 @@ function applySearchHighlights(): void {
   const allTargets = state.cy
     .nodes()
     .not(".state-hidden")
+    .not(".filtered-out")
     .filter((node: any) => isSearchTargetGroup(node.data("group")));
   const matches = allTargets.filter((node: any) => {
     const label = String(node.data("label") ?? "").toLocaleLowerCase();
@@ -2553,7 +2535,7 @@ function applySearchHighlights(): void {
 
   if (shouldDimNonMatches) {
     const connectedEdges = matches.connectedEdges();
-    state.cy.edges().not(".state-hidden").not(connectedEdges).addClass("search-dim");
+    state.cy.edges().not(".state-hidden").not(".filtered-out").not(connectedEdges).addClass("search-dim");
   }
 
   state.hasSearchHighlightClasses = true;

@@ -316,18 +316,6 @@ public sealed partial class MainWindow
 
     private static string NormalizeSolutionPath(string solutionPath)
     {
-        if (string.IsNullOrWhiteSpace(solutionPath))
-        {
-            return string.Empty;
-        }
-
-        try
-        {
-            return Path.GetFullPath(solutionPath);
-        }
-        catch
-        {
-            return solutionPath.Trim();
-        }
+        return PathNormalization.NormalizeDirectoryLikePath(solutionPath, catchAllExceptions: true);
     }
 }

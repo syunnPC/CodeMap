@@ -57,202 +57,177 @@ public sealed partial class SqliteSnapshotStore : IDisposable
         SolutionAnalysisSnapshot snapshot,
         CancellationToken cancellationToken = default)
     {
-        BeginOperation();
-        try
+        return await ExecuteExclusiveAsync(async ct =>
         {
-            await _gate.WaitAsync(cancellationToken);
-            try
+            string? databaseDirectoryPath = Path.GetDirectoryName(_databasePath);
+            if (!string.IsNullOrWhiteSpace(databaseDirectoryPath))
             {
-                string? databaseDirectoryPath = Path.GetDirectoryName(_databasePath);
-                if (!string.IsNullOrWhiteSpace(databaseDirectoryPath))
+                Directory.CreateDirectory(databaseDirectoryPath);
+            }
+
+            SqliteConnectionStringBuilder connectionStringBuilder = new()
+            {
+                DataSource = _databasePath,
+                Mode = SqliteOpenMode.ReadWriteCreate,
+                Cache = SqliteCacheMode.Shared
+            };
+
+            await using SqliteConnection connection = new(connectionStringBuilder.ToString());
+            await connection.OpenAsync(ct);
+            await EnsureSchemaAsync(connection, ct);
+
+            await using SqliteTransaction transaction = (SqliteTransaction)await connection.BeginTransactionAsync(ct);
+            long snapshotId = await InsertSnapshotAsync(connection, transaction, snapshot, ct);
+            using SnapshotInsertCommands insertCommands = CreateSnapshotInsertCommands(connection, transaction, _ftsEnabled);
+
+            foreach (ProjectAnalysisSummary project in snapshot.Projects)
+            {
+                string projectKey = project.ProjectKey;
+                await InsertProjectAsync(insertCommands.ProjectCommand, snapshotId, projectKey, project, ct);
+
+                foreach (ProjectReferenceSummary projectReference in project.ProjectReferences)
                 {
-                    Directory.CreateDirectory(databaseDirectoryPath);
+                    await InsertDependencyAsync(
+                        insertCommands.DependencyCommand,
+                        snapshotId,
+                        projectKey,
+                        project.Name,
+                        "project",
+                        projectReference.TargetProjectKey,
+                        dependencyOrigin: projectReference.DisplayName,
+                        confidence: null,
+                        importedSymbols: null,
+                        ct);
                 }
 
-                SqliteConnectionStringBuilder connectionStringBuilder = new()
+                foreach (string packageReference in project.PackageReferences)
                 {
-                    DataSource = _databasePath,
-                    Mode = SqliteOpenMode.ReadWriteCreate,
-                    Cache = SqliteCacheMode.Shared
-                };
+                    await InsertDependencyAsync(
+                        insertCommands.DependencyCommand,
+                        snapshotId,
+                        projectKey,
+                        project.Name,
+                        "package",
+                        packageReference,
+                        dependencyOrigin: null,
+                        confidence: null,
+                        importedSymbols: null,
+                        ct);
+                }
 
-                await using SqliteConnection connection = new(connectionStringBuilder.ToString());
-                await connection.OpenAsync(cancellationToken);
-                await EnsureSchemaAsync(connection, cancellationToken);
-
-                await using SqliteTransaction transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
-                long snapshotId = await InsertSnapshotAsync(connection, transaction, snapshot, cancellationToken);
-                using SnapshotInsertCommands insertCommands = CreateSnapshotInsertCommands(connection, transaction, _ftsEnabled);
-
-                foreach (ProjectAnalysisSummary project in snapshot.Projects)
+                foreach (string metadataReference in project.MetadataReferences)
                 {
-                    string projectKey = project.ProjectKey;
-                    await InsertProjectAsync(insertCommands.ProjectCommand, snapshotId, projectKey, project, cancellationToken);
+                    await InsertDependencyAsync(
+                        insertCommands.DependencyCommand,
+                        snapshotId,
+                        projectKey,
+                        project.Name,
+                        "assembly",
+                        metadataReference,
+                        dependencyOrigin: null,
+                        confidence: null,
+                        importedSymbols: null,
+                        ct);
+                }
 
-                    foreach (ProjectReferenceSummary projectReference in project.ProjectReferences)
-                    {
-                        await InsertDependencyAsync(
-                            insertCommands.DependencyCommand,
-                            snapshotId,
-                            projectKey,
-                            project.Name,
-                            "project",
-                            projectReference.TargetProjectKey,
-                            dependencyOrigin: projectReference.DisplayName,
-                            confidence: null,
-                            importedSymbols: null,
-                            cancellationToken);
-                    }
+                foreach (NativeDependencySummary nativeDependency in project.NativeDependencies)
+                {
+                    await InsertDependencyAsync(
+                        insertCommands.DependencyCommand,
+                        snapshotId,
+                        projectKey,
+                        project.Name,
+                        "dll",
+                        nativeDependency.LibraryName,
+                        nativeDependency.ImportKind,
+                        nativeDependency.Confidence,
+                        nativeDependency.ImportedSymbols.Count == 0
+                            ? null
+                            : string.Join(", ", nativeDependency.ImportedSymbols),
+                        ct);
+                }
 
-                    foreach (string packageReference in project.PackageReferences)
-                    {
-                        await InsertDependencyAsync(
-                            insertCommands.DependencyCommand,
-                            snapshotId,
-                            projectKey,
-                            project.Name,
-                            "package",
-                            packageReference,
-                            dependencyOrigin: null,
-                            confidence: null,
-                            importedSymbols: null,
-                            cancellationToken);
-                    }
+                foreach (DocumentAnalysisSummary document in project.Documents)
+                {
+                    await InsertDocumentAsync(
+                        insertCommands.DocumentCommand,
+                        snapshotId,
+                        projectKey,
+                        project.Name,
+                        document,
+                        ct);
 
-                    foreach (string metadataReference in project.MetadataReferences)
+                    foreach (SymbolAnalysisSummary symbol in document.Symbols)
                     {
-                        await InsertDependencyAsync(
-                            insertCommands.DependencyCommand,
-                            snapshotId,
-                            projectKey,
-                            project.Name,
-                            "assembly",
-                            metadataReference,
-                            dependencyOrigin: null,
-                            confidence: null,
-                            importedSymbols: null,
-                            cancellationToken);
-                    }
-
-                    foreach (NativeDependencySummary nativeDependency in project.NativeDependencies)
-                    {
-                        await InsertDependencyAsync(
-                            insertCommands.DependencyCommand,
-                            snapshotId,
-                            projectKey,
-                            project.Name,
-                            "dll",
-                            nativeDependency.LibraryName,
-                            nativeDependency.ImportKind,
-                            nativeDependency.Confidence,
-                            nativeDependency.ImportedSymbols.Count == 0
-                                ? null
-                                : string.Join(", ", nativeDependency.ImportedSymbols),
-                            cancellationToken);
-                    }
-
-                    foreach (DocumentAnalysisSummary document in project.Documents)
-                    {
-                        await InsertDocumentAsync(
-                            insertCommands.DocumentCommand,
+                        await InsertSymbolAsync(
+                            insertCommands.SymbolCommand,
+                            insertCommands.SymbolFtsCommand,
                             snapshotId,
                             projectKey,
                             project.Name,
                             document,
-                            cancellationToken);
-
-                        foreach (SymbolAnalysisSummary symbol in document.Symbols)
-                        {
-                            await InsertSymbolAsync(
-                                insertCommands.SymbolCommand,
-                                insertCommands.SymbolFtsCommand,
-                                snapshotId,
-                                projectKey,
-                                project.Name,
-                                document,
-                                symbol,
-                                cancellationToken);
-                        }
+                            symbol,
+                            ct);
                     }
                 }
-
-                foreach (DocumentDependencySummary dependency in snapshot.DocumentDependencies)
-                {
-                    await InsertDocumentDependencyAsync(
-                        insertCommands.DocumentDependencyCommand,
-                        snapshotId,
-                        dependency,
-                        cancellationToken);
-                }
-
-                foreach (SymbolDependencySummary dependency in snapshot.SymbolDependencies)
-                {
-                    await InsertSymbolDependencyAsync(
-                        insertCommands.SymbolDependencyCommand,
-                        snapshotId,
-                        dependency,
-                        cancellationToken);
-                }
-
-                foreach (DependencyCycleSummary cycle in snapshot.Cycles)
-                {
-                    await InsertCycleAsync(
-                        insertCommands.CycleCommand,
-                        insertCommands.CycleNodeCommand,
-                        snapshotId,
-                        cycle,
-                        cancellationToken);
-                }
-
-                for (int index = 0; index < snapshot.Diagnostics.Count; index++)
-                {
-                    await InsertDiagnosticAsync(
-                        insertCommands.DiagnosticCommand,
-                        snapshotId,
-                        index,
-                        snapshot.Diagnostics[index],
-                        cancellationToken);
-                }
-
-                await DeleteObsoleteSnapshotsAsync(connection, transaction, cancellationToken);
-                await transaction.CommitAsync(cancellationToken);
-                return new SnapshotPersistenceResult(snapshotId, _databasePath);
             }
-            finally
+
+            foreach (DocumentDependencySummary dependency in snapshot.DocumentDependencies)
             {
-                _gate.Release();
+                await InsertDocumentDependencyAsync(
+                    insertCommands.DocumentDependencyCommand,
+                    snapshotId,
+                    dependency,
+                    ct);
             }
-        }
-        finally
-        {
-            EndOperation();
-        }
+
+            foreach (SymbolDependencySummary dependency in snapshot.SymbolDependencies)
+            {
+                await InsertSymbolDependencyAsync(
+                    insertCommands.SymbolDependencyCommand,
+                    snapshotId,
+                    dependency,
+                    ct);
+            }
+
+            foreach (DependencyCycleSummary cycle in snapshot.Cycles)
+            {
+                await InsertCycleAsync(
+                    insertCommands.CycleCommand,
+                    insertCommands.CycleNodeCommand,
+                    snapshotId,
+                    cycle,
+                    ct);
+            }
+
+            for (int index = 0; index < snapshot.Diagnostics.Count; index++)
+            {
+                await InsertDiagnosticAsync(
+                    insertCommands.DiagnosticCommand,
+                    snapshotId,
+                    index,
+                    snapshot.Diagnostics[index],
+                    ct);
+            }
+
+            await DeleteObsoleteSnapshotsAsync(connection, transaction, ct);
+            await transaction.CommitAsync(ct);
+            return new SnapshotPersistenceResult(snapshotId, _databasePath);
+        }, cancellationToken);
     }
 
     public async Task ClearAllAsync(CancellationToken cancellationToken = default)
     {
-        BeginOperation();
-        try
+        await ExecuteExclusiveAsync(ct =>
         {
-            await _gate.WaitAsync(cancellationToken);
-            try
-            {
-                _schemaInitialized = false;
-                _ftsEnabled = false;
-                SqliteConnection.ClearAllPools();
-                DeleteFileIfExists(_databasePath);
-                DeleteFileIfExists($"{_databasePath}-wal");
-                DeleteFileIfExists($"{_databasePath}-shm");
-            }
-            finally
-            {
-                _gate.Release();
-            }
-        }
-        finally
-        {
-            EndOperation();
-        }
+            _schemaInitialized = false;
+            _ftsEnabled = false;
+            SqliteConnection.ClearAllPools();
+            DeleteFileIfExists(_databasePath);
+            DeleteFileIfExists($"{_databasePath}-wal");
+            DeleteFileIfExists($"{_databasePath}-shm");
+            return Task.CompletedTask;
+        }, cancellationToken);
     }
 
     public async Task<SolutionAnalysisSnapshot?> TryLoadLatestSnapshotAsync(
@@ -264,175 +239,162 @@ public sealed partial class SqliteSnapshotStore : IDisposable
             return null;
         }
 
-        BeginOperation();
-        try
+        return await ExecuteExclusiveAsync(async ct =>
         {
-            await _gate.WaitAsync(cancellationToken);
-            try
+            if (!File.Exists(_databasePath))
             {
-                if (!File.Exists(_databasePath))
+                return null;
+            }
+
+            SqliteConnectionStringBuilder connectionStringBuilder = new()
+            {
+                DataSource = _databasePath,
+                Mode = SqliteOpenMode.ReadOnly,
+                Cache = SqliteCacheMode.Private
+            };
+
+            await using SqliteConnection connection = new(connectionStringBuilder.ToString());
+            await connection.OpenAsync(ct);
+
+            if (!await TableExistsAsync(connection, "snapshots", ct))
+            {
+                return null;
+            }
+
+            string resolvedWorkspacePath = Path.GetFullPath(workspacePath);
+            string normalizedWorkspacePath = NormalizeWorkspacePathForStorage(resolvedWorkspacePath);
+            HashSet<string> snapshotColumns = await LoadColumnNamesAsync(connection, "snapshots", ct);
+            bool hasSnapshotFormatVersionColumn = snapshotColumns.Contains("snapshot_format_version");
+
+            CachedSnapshotHeader? header = await LoadSnapshotHeaderAsync(
+                connection,
+                normalizedWorkspacePath,
+                resolvedWorkspacePath,
+                hasSnapshotFormatVersionColumn,
+                ct);
+            if (header is null)
+            {
+                return null;
+            }
+
+            if (header.SnapshotFormatVersion != CurrentSnapshotFormatVersion)
+            {
+                return null;
+            }
+
+            IReadOnlyList<CachedProjectRecord> projectRecords = await LoadProjectRecordsAsync(
+                connection,
+                header.SnapshotId,
+                ct);
+            IReadOnlyList<CachedSymbolRecord> symbolRecords = await LoadSymbolRecordsAsync(
+                connection,
+                header.SnapshotId,
+                ct);
+            IReadOnlyList<CachedDocumentRecord> documentRecords = await LoadDocumentRecordsAsync(
+                connection,
+                header.SnapshotId,
+                symbolRecords,
+                ct);
+            IReadOnlyList<CachedDependencyRecord> dependencyRecords = await LoadDependencyRecordsAsync(
+                connection,
+                header.SnapshotId,
+                ct);
+            IReadOnlyList<DocumentDependencySummary> documentDependencies = await LoadDocumentDependenciesAsync(
+                connection,
+                header.SnapshotId,
+                ct);
+            IReadOnlyList<SymbolDependencySummary> symbolDependencies = await LoadSymbolDependenciesAsync(
+                connection,
+                header.SnapshotId,
+                ct);
+            IReadOnlyList<DependencyCycleSummary> cycles = await LoadCyclesAsync(
+                connection,
+                header.SnapshotId,
+                ct);
+            IReadOnlyList<string> diagnostics = await LoadDiagnosticsAsync(
+                connection,
+                header.SnapshotId,
+                ct);
+
+            Dictionary<string, List<CachedDocumentRecord>> documentsByProject = BuildDocumentsByProject(documentRecords);
+            Dictionary<string, List<CachedSymbolRecord>> symbolsByDocumentId = BuildSymbolsByDocumentId(symbolRecords);
+            Dictionary<string, List<CachedDependencyRecord>> dependenciesByProject = BuildDependenciesByProject(dependencyRecords);
+
+            List<ProjectAnalysisSummary> projects = new(projectRecords.Count);
+            foreach (CachedProjectRecord projectRecord in projectRecords)
+            {
+                dependenciesByProject.TryGetValue(projectRecord.ProjectKey, out List<CachedDependencyRecord>? projectDependencies);
+                documentsByProject.TryGetValue(projectRecord.ProjectKey, out List<CachedDocumentRecord>? projectDocuments);
+
+                DocumentAnalysisSummary[] documents;
+                if (projectDocuments is null || projectDocuments.Count == 0)
                 {
-                    return null;
+                    documents = [];
                 }
-
-                SqliteConnectionStringBuilder connectionStringBuilder = new()
+                else
                 {
-                    DataSource = _databasePath,
-                    Mode = SqliteOpenMode.ReadOnly,
-                    Cache = SqliteCacheMode.Private
-                };
-
-                await using SqliteConnection connection = new(connectionStringBuilder.ToString());
-                await connection.OpenAsync(cancellationToken);
-
-                if (!await TableExistsAsync(connection, "snapshots", cancellationToken))
-                {
-                    return null;
-                }
-
-                string resolvedWorkspacePath = Path.GetFullPath(workspacePath);
-                string normalizedWorkspacePath = NormalizeWorkspacePathForStorage(resolvedWorkspacePath);
-                HashSet<string> snapshotColumns = await LoadColumnNamesAsync(connection, "snapshots", cancellationToken);
-                bool hasSnapshotFormatVersionColumn = snapshotColumns.Contains("snapshot_format_version");
-
-                CachedSnapshotHeader? header = await LoadSnapshotHeaderAsync(
-                    connection,
-                    normalizedWorkspacePath,
-                    resolvedWorkspacePath,
-                    hasSnapshotFormatVersionColumn,
-                    cancellationToken);
-                if (header is null)
-                {
-                    return null;
-                }
-
-                if (header.SnapshotFormatVersion != CurrentSnapshotFormatVersion)
-                {
-                    return null;
-                }
-
-                IReadOnlyList<CachedProjectRecord> projectRecords = await LoadProjectRecordsAsync(
-                    connection,
-                    header.SnapshotId,
-                    cancellationToken);
-                IReadOnlyList<CachedSymbolRecord> symbolRecords = await LoadSymbolRecordsAsync(
-                    connection,
-                    header.SnapshotId,
-                    cancellationToken);
-                IReadOnlyList<CachedDocumentRecord> documentRecords = await LoadDocumentRecordsAsync(
-                    connection,
-                    header.SnapshotId,
-                    symbolRecords,
-                    cancellationToken);
-                IReadOnlyList<CachedDependencyRecord> dependencyRecords = await LoadDependencyRecordsAsync(
-                    connection,
-                    header.SnapshotId,
-                    cancellationToken);
-                IReadOnlyList<DocumentDependencySummary> documentDependencies = await LoadDocumentDependenciesAsync(
-                    connection,
-                    header.SnapshotId,
-                    cancellationToken);
-                IReadOnlyList<SymbolDependencySummary> symbolDependencies = await LoadSymbolDependenciesAsync(
-                    connection,
-                    header.SnapshotId,
-                    cancellationToken);
-                IReadOnlyList<DependencyCycleSummary> cycles = await LoadCyclesAsync(
-                    connection,
-                    header.SnapshotId,
-                    cancellationToken);
-                IReadOnlyList<string> diagnostics = await LoadDiagnosticsAsync(
-                    connection,
-                    header.SnapshotId,
-                    cancellationToken);
-
-                Dictionary<string, List<CachedDocumentRecord>> documentsByProject = BuildDocumentsByProject(documentRecords);
-                Dictionary<string, List<CachedSymbolRecord>> symbolsByDocumentId = BuildSymbolsByDocumentId(symbolRecords);
-                Dictionary<string, List<CachedDependencyRecord>> dependenciesByProject = BuildDependenciesByProject(dependencyRecords);
-
-                List<ProjectAnalysisSummary> projects = new(projectRecords.Count);
-                foreach (CachedProjectRecord projectRecord in projectRecords)
-                {
-                    dependenciesByProject.TryGetValue(projectRecord.ProjectKey, out List<CachedDependencyRecord>? projectDependencies);
-                    documentsByProject.TryGetValue(projectRecord.ProjectKey, out List<CachedDocumentRecord>? projectDocuments);
-
-                    DocumentAnalysisSummary[] documents;
-                    if (projectDocuments is null || projectDocuments.Count == 0)
+                    documents = new DocumentAnalysisSummary[projectDocuments.Count];
+                    for (int documentIndex = 0; documentIndex < projectDocuments.Count; documentIndex++)
                     {
-                        documents = [];
-                    }
-                    else
-                    {
-                        documents = new DocumentAnalysisSummary[projectDocuments.Count];
-                        for (int documentIndex = 0; documentIndex < projectDocuments.Count; documentIndex++)
+                        CachedDocumentRecord documentRecord = projectDocuments[documentIndex];
+                        symbolsByDocumentId.TryGetValue(documentRecord.DocumentId, out List<CachedSymbolRecord>? documentSymbols);
+
+                        SymbolAnalysisSummary[] symbols;
+                        if (documentSymbols is null || documentSymbols.Count == 0)
                         {
-                            CachedDocumentRecord documentRecord = projectDocuments[documentIndex];
-                            symbolsByDocumentId.TryGetValue(documentRecord.DocumentId, out List<CachedSymbolRecord>? documentSymbols);
-
-                            SymbolAnalysisSummary[] symbols;
-                            if (documentSymbols is null || documentSymbols.Count == 0)
-                            {
-                                symbols = [];
-                            }
-                            else
-                            {
-                                symbols = new SymbolAnalysisSummary[documentSymbols.Count];
-                                for (int symbolIndex = 0; symbolIndex < documentSymbols.Count; symbolIndex++)
-                                {
-                                    CachedSymbolRecord symbol = documentSymbols[symbolIndex];
-                                    symbols[symbolIndex] = new SymbolAnalysisSummary(
-                                        symbol.SymbolId,
-                                        symbol.SymbolKind,
-                                        symbol.SymbolName,
-                                        symbol.SymbolDisplayName,
-                                        symbol.LineNumber);
-                                }
-                            }
-
-                            documents[documentIndex] = new DocumentAnalysisSummary(
-                                documentRecord.DocumentId,
-                                documentRecord.DocumentName,
-                                documentRecord.DocumentFilePath,
-                                symbols);
+                            symbols = [];
                         }
+                        else
+                        {
+                            symbols = new SymbolAnalysisSummary[documentSymbols.Count];
+                            for (int symbolIndex = 0; symbolIndex < documentSymbols.Count; symbolIndex++)
+                            {
+                                CachedSymbolRecord symbol = documentSymbols[symbolIndex];
+                                symbols[symbolIndex] = new SymbolAnalysisSummary(
+                                    symbol.SymbolId,
+                                    symbol.SymbolKind,
+                                    symbol.SymbolName,
+                                    symbol.SymbolDisplayName,
+                                    symbol.LineNumber);
+                            }
+                        }
+
+                        documents[documentIndex] = new DocumentAnalysisSummary(
+                            documentRecord.DocumentId,
+                            documentRecord.DocumentName,
+                            documentRecord.DocumentFilePath,
+                            symbols);
                     }
-
-                    IReadOnlyList<ProjectReferenceSummary> projectReferences = BuildProjectReferences(projectDependencies);
-                    IReadOnlyList<string> packageReferences = BuildDistinctDependencyNames(projectDependencies, "package");
-                    IReadOnlyList<string> metadataReferences = BuildDistinctDependencyNames(projectDependencies, "assembly");
-                    IReadOnlyList<NativeDependencySummary> nativeDependencies = BuildNativeDependencies(projectDependencies);
-
-                    projects.Add(new ProjectAnalysisSummary(
-                        projectRecord.ProjectName,
-                        projectRecord.Language,
-                        projectRecord.ProjectFilePath,
-                        projectRecord.ProjectKey,
-                        projectRecord.IsFolderBased,
-                        documents,
-                        projectReferences,
-                        metadataReferences,
-                        packageReferences,
-                        nativeDependencies));
                 }
 
-                return new SolutionAnalysisSnapshot(
-                    resolvedWorkspacePath,
-                    header.WorkspaceKind,
-                    header.AnalyzedAt,
-                    projects,
-                    documentDependencies,
-                    symbolDependencies,
-                    cycles,
-                    diagnostics);
+                IReadOnlyList<ProjectReferenceSummary> projectReferences = BuildProjectReferences(projectDependencies);
+                IReadOnlyList<string> packageReferences = BuildDistinctDependencyNames(projectDependencies, "package");
+                IReadOnlyList<string> metadataReferences = BuildDistinctDependencyNames(projectDependencies, "assembly");
+                IReadOnlyList<NativeDependencySummary> nativeDependencies = BuildNativeDependencies(projectDependencies);
+
+                projects.Add(new ProjectAnalysisSummary(
+                    projectRecord.ProjectName,
+                    projectRecord.Language,
+                    projectRecord.ProjectFilePath,
+                    projectRecord.ProjectKey,
+                    projectRecord.IsFolderBased,
+                    documents,
+                    projectReferences,
+                    metadataReferences,
+                    packageReferences,
+                    nativeDependencies));
             }
-            finally
-            {
-                _gate.Release();
-            }
-        }
-        finally
-        {
-            EndOperation();
-        }
+
+            return new SolutionAnalysisSnapshot(
+                resolvedWorkspacePath,
+                header.WorkspaceKind,
+                header.AnalyzedAt,
+                projects,
+                documentDependencies,
+                symbolDependencies,
+                cycles,
+                diagnostics);
+        }, cancellationToken);
     }
 
     private void BeginOperation()
@@ -464,6 +426,42 @@ public sealed partial class SqliteSnapshotStore : IDisposable
         if (disposeGate)
         {
             _gate.Dispose();
+        }
+    }
+
+    private async Task ExecuteExclusiveAsync(
+        Func<CancellationToken, Task> operation,
+        CancellationToken cancellationToken)
+    {
+        await ExecuteExclusiveAsync(
+            async ct =>
+            {
+                await operation(ct);
+                return true;
+            },
+            cancellationToken);
+    }
+
+    private async Task<T> ExecuteExclusiveAsync<T>(
+        Func<CancellationToken, Task<T>> operation,
+        CancellationToken cancellationToken)
+    {
+        BeginOperation();
+        try
+        {
+            await _gate.WaitAsync(cancellationToken);
+            try
+            {
+                return await operation(cancellationToken);
+            }
+            finally
+            {
+                _gate.Release();
+            }
+        }
+        finally
+        {
+            EndOperation();
         }
     }
 
@@ -848,9 +846,9 @@ public sealed partial class SqliteSnapshotStore : IDisposable
         SqliteTransaction transaction,
         bool ftsEnabled)
     {
-        SqliteCommand projectCommand = connection.CreateCommand();
-        projectCommand.Transaction = transaction;
-        projectCommand.CommandText =
+        SqliteCommand projectCommand = CreateParameterizedCommand(
+            connection,
+            transaction,
             """
             INSERT INTO snapshot_projects (
                 snapshot_id,
@@ -871,19 +869,19 @@ public sealed partial class SqliteSnapshotStore : IDisposable
                 $documentCount,
                 $symbolCount
             );
-            """;
-        projectCommand.Parameters.AddWithValue("$snapshotId", 0L);
-        projectCommand.Parameters.AddWithValue("$projectKey", string.Empty);
-        projectCommand.Parameters.AddWithValue("$projectName", string.Empty);
-        projectCommand.Parameters.AddWithValue("$language", string.Empty);
-        projectCommand.Parameters.AddWithValue("$projectFilePath", DBNull.Value);
-        projectCommand.Parameters.AddWithValue("$isFolderBased", 0);
-        projectCommand.Parameters.AddWithValue("$documentCount", 0);
-        projectCommand.Parameters.AddWithValue("$symbolCount", 0);
+            """,
+            ("$snapshotId", 0L),
+            ("$projectKey", string.Empty),
+            ("$projectName", string.Empty),
+            ("$language", string.Empty),
+            ("$projectFilePath", DBNull.Value),
+            ("$isFolderBased", 0),
+            ("$documentCount", 0),
+            ("$symbolCount", 0));
 
-        SqliteCommand dependencyCommand = connection.CreateCommand();
-        dependencyCommand.Transaction = transaction;
-        dependencyCommand.CommandText =
+        SqliteCommand dependencyCommand = CreateParameterizedCommand(
+            connection,
+            transaction,
             """
             INSERT INTO snapshot_dependencies (
                 snapshot_id,
@@ -904,19 +902,19 @@ public sealed partial class SqliteSnapshotStore : IDisposable
                 $confidence,
                 $importedSymbols
             );
-            """;
-        dependencyCommand.Parameters.AddWithValue("$snapshotId", 0L);
-        dependencyCommand.Parameters.AddWithValue("$projectKey", string.Empty);
-        dependencyCommand.Parameters.AddWithValue("$projectName", string.Empty);
-        dependencyCommand.Parameters.AddWithValue("$dependencyKind", string.Empty);
-        dependencyCommand.Parameters.AddWithValue("$dependencyName", string.Empty);
-        dependencyCommand.Parameters.AddWithValue("$dependencyOrigin", DBNull.Value);
-        dependencyCommand.Parameters.AddWithValue("$confidence", DBNull.Value);
-        dependencyCommand.Parameters.AddWithValue("$importedSymbols", DBNull.Value);
+            """,
+            ("$snapshotId", 0L),
+            ("$projectKey", string.Empty),
+            ("$projectName", string.Empty),
+            ("$dependencyKind", string.Empty),
+            ("$dependencyName", string.Empty),
+            ("$dependencyOrigin", DBNull.Value),
+            ("$confidence", DBNull.Value),
+            ("$importedSymbols", DBNull.Value));
 
-        SqliteCommand documentCommand = connection.CreateCommand();
-        documentCommand.Transaction = transaction;
-        documentCommand.CommandText =
+        SqliteCommand documentCommand = CreateParameterizedCommand(
+            connection,
+            transaction,
             """
             INSERT INTO snapshot_documents (
                 snapshot_id,
@@ -933,17 +931,17 @@ public sealed partial class SqliteSnapshotStore : IDisposable
                 $documentName,
                 $documentFilePath
             );
-            """;
-        documentCommand.Parameters.AddWithValue("$snapshotId", 0L);
-        documentCommand.Parameters.AddWithValue("$projectKey", string.Empty);
-        documentCommand.Parameters.AddWithValue("$projectName", string.Empty);
-        documentCommand.Parameters.AddWithValue("$documentId", string.Empty);
-        documentCommand.Parameters.AddWithValue("$documentName", string.Empty);
-        documentCommand.Parameters.AddWithValue("$documentFilePath", DBNull.Value);
+            """,
+            ("$snapshotId", 0L),
+            ("$projectKey", string.Empty),
+            ("$projectName", string.Empty),
+            ("$documentId", string.Empty),
+            ("$documentName", string.Empty),
+            ("$documentFilePath", DBNull.Value));
 
-        SqliteCommand symbolCommand = connection.CreateCommand();
-        symbolCommand.Transaction = transaction;
-        symbolCommand.CommandText =
+        SqliteCommand symbolCommand = CreateParameterizedCommand(
+            connection,
+            transaction,
             """
             INSERT INTO snapshot_symbols (
                 snapshot_id,
@@ -970,25 +968,25 @@ public sealed partial class SqliteSnapshotStore : IDisposable
                 $displayName,
                 $lineNumber
             );
-            """;
-        symbolCommand.Parameters.AddWithValue("$snapshotId", 0L);
-        symbolCommand.Parameters.AddWithValue("$symbolId", string.Empty);
-        symbolCommand.Parameters.AddWithValue("$projectKey", string.Empty);
-        symbolCommand.Parameters.AddWithValue("$projectName", string.Empty);
-        symbolCommand.Parameters.AddWithValue("$documentId", string.Empty);
-        symbolCommand.Parameters.AddWithValue("$documentName", string.Empty);
-        symbolCommand.Parameters.AddWithValue("$documentFilePath", DBNull.Value);
-        symbolCommand.Parameters.AddWithValue("$symbolKind", string.Empty);
-        symbolCommand.Parameters.AddWithValue("$symbolName", string.Empty);
-        symbolCommand.Parameters.AddWithValue("$displayName", string.Empty);
-        symbolCommand.Parameters.AddWithValue("$lineNumber", 0);
+            """,
+            ("$snapshotId", 0L),
+            ("$symbolId", string.Empty),
+            ("$projectKey", string.Empty),
+            ("$projectName", string.Empty),
+            ("$documentId", string.Empty),
+            ("$documentName", string.Empty),
+            ("$documentFilePath", DBNull.Value),
+            ("$symbolKind", string.Empty),
+            ("$symbolName", string.Empty),
+            ("$displayName", string.Empty),
+            ("$lineNumber", 0));
 
         SqliteCommand? symbolFtsCommand = null;
         if (ftsEnabled)
         {
-            symbolFtsCommand = connection.CreateCommand();
-            symbolFtsCommand.Transaction = transaction;
-            symbolFtsCommand.CommandText =
+            symbolFtsCommand = CreateParameterizedCommand(
+                connection,
+                transaction,
                 """
                 INSERT INTO snapshot_symbol_fts (
                     snapshot_id,
@@ -1003,17 +1001,17 @@ public sealed partial class SqliteSnapshotStore : IDisposable
                     $symbolKind,
                     $symbolName
                 );
-                """;
-            symbolFtsCommand.Parameters.AddWithValue("$snapshotId", 0L);
-            symbolFtsCommand.Parameters.AddWithValue("$projectName", string.Empty);
-            symbolFtsCommand.Parameters.AddWithValue("$documentName", string.Empty);
-            symbolFtsCommand.Parameters.AddWithValue("$symbolKind", string.Empty);
-            symbolFtsCommand.Parameters.AddWithValue("$symbolName", string.Empty);
+                """,
+                ("$snapshotId", 0L),
+                ("$projectName", string.Empty),
+                ("$documentName", string.Empty),
+                ("$symbolKind", string.Empty),
+                ("$symbolName", string.Empty));
         }
 
-        SqliteCommand diagnosticCommand = connection.CreateCommand();
-        diagnosticCommand.Transaction = transaction;
-        diagnosticCommand.CommandText =
+        SqliteCommand diagnosticCommand = CreateParameterizedCommand(
+            connection,
+            transaction,
             """
             INSERT INTO snapshot_diagnostics (
                 snapshot_id,
@@ -1024,14 +1022,14 @@ public sealed partial class SqliteSnapshotStore : IDisposable
                 $ordinal,
                 $message
             );
-            """;
-        diagnosticCommand.Parameters.AddWithValue("$snapshotId", 0L);
-        diagnosticCommand.Parameters.AddWithValue("$ordinal", 0);
-        diagnosticCommand.Parameters.AddWithValue("$message", string.Empty);
+            """,
+            ("$snapshotId", 0L),
+            ("$ordinal", 0),
+            ("$message", string.Empty));
 
-        SqliteCommand documentDependencyCommand = connection.CreateCommand();
-        documentDependencyCommand.Transaction = transaction;
-        documentDependencyCommand.CommandText =
+        SqliteCommand documentDependencyCommand = CreateParameterizedCommand(
+            connection,
+            transaction,
             """
             INSERT INTO snapshot_document_dependencies (
                 snapshot_id,
@@ -1050,18 +1048,18 @@ public sealed partial class SqliteSnapshotStore : IDisposable
                 $sampleLineNumber,
                 $sampleSnippet
             );
-            """;
-        documentDependencyCommand.Parameters.AddWithValue("$snapshotId", 0L);
-        documentDependencyCommand.Parameters.AddWithValue("$sourceDocumentId", string.Empty);
-        documentDependencyCommand.Parameters.AddWithValue("$targetDocumentId", string.Empty);
-        documentDependencyCommand.Parameters.AddWithValue("$referenceCount", 0);
-        documentDependencyCommand.Parameters.AddWithValue("$sampleFilePath", DBNull.Value);
-        documentDependencyCommand.Parameters.AddWithValue("$sampleLineNumber", DBNull.Value);
-        documentDependencyCommand.Parameters.AddWithValue("$sampleSnippet", DBNull.Value);
+            """,
+            ("$snapshotId", 0L),
+            ("$sourceDocumentId", string.Empty),
+            ("$targetDocumentId", string.Empty),
+            ("$referenceCount", 0),
+            ("$sampleFilePath", DBNull.Value),
+            ("$sampleLineNumber", DBNull.Value),
+            ("$sampleSnippet", DBNull.Value));
 
-        SqliteCommand symbolDependencyCommand = connection.CreateCommand();
-        symbolDependencyCommand.Transaction = transaction;
-        symbolDependencyCommand.CommandText =
+        SqliteCommand symbolDependencyCommand = CreateParameterizedCommand(
+            connection,
+            transaction,
             """
             INSERT INTO snapshot_symbol_dependencies (
                 snapshot_id,
@@ -1084,20 +1082,20 @@ public sealed partial class SqliteSnapshotStore : IDisposable
                 $sampleLineNumber,
                 $sampleSnippet
             );
-            """;
-        symbolDependencyCommand.Parameters.AddWithValue("$snapshotId", 0L);
-        symbolDependencyCommand.Parameters.AddWithValue("$sourceSymbolId", string.Empty);
-        symbolDependencyCommand.Parameters.AddWithValue("$targetSymbolId", string.Empty);
-        symbolDependencyCommand.Parameters.AddWithValue("$referenceCount", 0);
-        symbolDependencyCommand.Parameters.AddWithValue("$referenceKind", string.Empty);
-        symbolDependencyCommand.Parameters.AddWithValue("$confidence", string.Empty);
-        symbolDependencyCommand.Parameters.AddWithValue("$sampleFilePath", DBNull.Value);
-        symbolDependencyCommand.Parameters.AddWithValue("$sampleLineNumber", DBNull.Value);
-        symbolDependencyCommand.Parameters.AddWithValue("$sampleSnippet", DBNull.Value);
+            """,
+            ("$snapshotId", 0L),
+            ("$sourceSymbolId", string.Empty),
+            ("$targetSymbolId", string.Empty),
+            ("$referenceCount", 0),
+            ("$referenceKind", string.Empty),
+            ("$confidence", string.Empty),
+            ("$sampleFilePath", DBNull.Value),
+            ("$sampleLineNumber", DBNull.Value),
+            ("$sampleSnippet", DBNull.Value));
 
-        SqliteCommand cycleCommand = connection.CreateCommand();
-        cycleCommand.Transaction = transaction;
-        cycleCommand.CommandText =
+        SqliteCommand cycleCommand = CreateParameterizedCommand(
+            connection,
+            transaction,
             """
             INSERT INTO snapshot_cycles (
                 snapshot_id,
@@ -1112,16 +1110,16 @@ public sealed partial class SqliteSnapshotStore : IDisposable
                 $edgeCount,
                 $nodeCount
             );
-            """;
-        cycleCommand.Parameters.AddWithValue("$snapshotId", 0L);
-        cycleCommand.Parameters.AddWithValue("$cycleId", string.Empty);
-        cycleCommand.Parameters.AddWithValue("$graphKind", string.Empty);
-        cycleCommand.Parameters.AddWithValue("$edgeCount", 0);
-        cycleCommand.Parameters.AddWithValue("$nodeCount", 0);
+            """,
+            ("$snapshotId", 0L),
+            ("$cycleId", string.Empty),
+            ("$graphKind", string.Empty),
+            ("$edgeCount", 0),
+            ("$nodeCount", 0));
 
-        SqliteCommand cycleNodeCommand = connection.CreateCommand();
-        cycleNodeCommand.Transaction = transaction;
-        cycleNodeCommand.CommandText =
+        SqliteCommand cycleNodeCommand = CreateParameterizedCommand(
+            connection,
+            transaction,
             """
             INSERT INTO snapshot_cycle_nodes (
                 snapshot_id,
@@ -1136,12 +1134,12 @@ public sealed partial class SqliteSnapshotStore : IDisposable
                 $nodeId,
                 $sortOrder
             );
-            """;
-        cycleNodeCommand.Parameters.AddWithValue("$snapshotId", 0L);
-        cycleNodeCommand.Parameters.AddWithValue("$cycleId", string.Empty);
-        cycleNodeCommand.Parameters.AddWithValue("$graphKind", string.Empty);
-        cycleNodeCommand.Parameters.AddWithValue("$nodeId", string.Empty);
-        cycleNodeCommand.Parameters.AddWithValue("$sortOrder", 0);
+            """,
+            ("$snapshotId", 0L),
+            ("$cycleId", string.Empty),
+            ("$graphKind", string.Empty),
+            ("$nodeId", string.Empty),
+            ("$sortOrder", 0));
 
         return new SnapshotInsertCommands(
             projectCommand,
@@ -1206,15 +1204,16 @@ public sealed partial class SqliteSnapshotStore : IDisposable
         ProjectAnalysisSummary project,
         CancellationToken cancellationToken)
     {
-        command.Parameters[0].Value = snapshotId;
-        command.Parameters[1].Value = projectKey;
-        command.Parameters[2].Value = project.Name;
-        command.Parameters[3].Value = project.Language;
-        command.Parameters[4].Value = (object?)project.ProjectFilePath ?? DBNull.Value;
-        command.Parameters[5].Value = project.IsFolderBased ? 1 : 0;
-        command.Parameters[6].Value = project.Documents.Count;
-        command.Parameters[7].Value = project.Documents.Sum(document => document.Symbols.Count);
-
+        SetParameterValues(
+            command,
+            snapshotId,
+            projectKey,
+            project.Name,
+            project.Language,
+            project.ProjectFilePath,
+            project.IsFolderBased ? 1 : 0,
+            project.Documents.Count,
+            project.Documents.Sum(document => document.Symbols.Count));
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
@@ -1230,15 +1229,16 @@ public sealed partial class SqliteSnapshotStore : IDisposable
         string? importedSymbols,
         CancellationToken cancellationToken)
     {
-        command.Parameters[0].Value = snapshotId;
-        command.Parameters[1].Value = projectKey;
-        command.Parameters[2].Value = projectName;
-        command.Parameters[3].Value = dependencyKind;
-        command.Parameters[4].Value = dependencyName;
-        command.Parameters[5].Value = (object?)dependencyOrigin ?? DBNull.Value;
-        command.Parameters[6].Value = (object?)confidence ?? DBNull.Value;
-        command.Parameters[7].Value = (object?)importedSymbols ?? DBNull.Value;
-
+        SetParameterValues(
+            command,
+            snapshotId,
+            projectKey,
+            projectName,
+            dependencyKind,
+            dependencyName,
+            dependencyOrigin,
+            confidence,
+            importedSymbols);
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
@@ -1250,13 +1250,14 @@ public sealed partial class SqliteSnapshotStore : IDisposable
         DocumentAnalysisSummary document,
         CancellationToken cancellationToken)
     {
-        command.Parameters[0].Value = snapshotId;
-        command.Parameters[1].Value = projectKey;
-        command.Parameters[2].Value = projectName;
-        command.Parameters[3].Value = document.Id;
-        command.Parameters[4].Value = document.Name;
-        command.Parameters[5].Value = (object?)document.FilePath ?? DBNull.Value;
-
+        SetParameterValues(
+            command,
+            snapshotId,
+            projectKey,
+            projectName,
+            document.Id,
+            document.Name,
+            document.FilePath);
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
@@ -1270,18 +1271,19 @@ public sealed partial class SqliteSnapshotStore : IDisposable
         SymbolAnalysisSummary symbol,
         CancellationToken cancellationToken)
     {
-        symbolCommand.Parameters[0].Value = snapshotId;
-        symbolCommand.Parameters[1].Value = symbol.Id;
-        symbolCommand.Parameters[2].Value = projectKey;
-        symbolCommand.Parameters[3].Value = projectName;
-        symbolCommand.Parameters[4].Value = document.Id;
-        symbolCommand.Parameters[5].Value = document.Name;
-        symbolCommand.Parameters[6].Value = (object?)document.FilePath ?? DBNull.Value;
-        symbolCommand.Parameters[7].Value = symbol.Kind;
-        symbolCommand.Parameters[8].Value = symbol.Name;
-        symbolCommand.Parameters[9].Value = symbol.DisplayName;
-        symbolCommand.Parameters[10].Value = symbol.LineNumber;
-
+        SetParameterValues(
+            symbolCommand,
+            snapshotId,
+            symbol.Id,
+            projectKey,
+            projectName,
+            document.Id,
+            document.Name,
+            document.FilePath,
+            symbol.Kind,
+            symbol.Name,
+            symbol.DisplayName,
+            symbol.LineNumber);
         await symbolCommand.ExecuteNonQueryAsync(cancellationToken);
 
         if (symbolFtsCommand is null)
@@ -1289,12 +1291,13 @@ public sealed partial class SqliteSnapshotStore : IDisposable
             return;
         }
 
-        symbolFtsCommand.Parameters[0].Value = snapshotId;
-        symbolFtsCommand.Parameters[1].Value = projectName;
-        symbolFtsCommand.Parameters[2].Value = document.Name;
-        symbolFtsCommand.Parameters[3].Value = symbol.Kind;
-        symbolFtsCommand.Parameters[4].Value = symbol.Name;
-
+        SetParameterValues(
+            symbolFtsCommand,
+            snapshotId,
+            projectName,
+            document.Name,
+            symbol.Kind,
+            symbol.Name);
         await symbolFtsCommand.ExecuteNonQueryAsync(cancellationToken);
     }
 
@@ -1305,9 +1308,7 @@ public sealed partial class SqliteSnapshotStore : IDisposable
         string message,
         CancellationToken cancellationToken)
     {
-        command.Parameters[0].Value = snapshotId;
-        command.Parameters[1].Value = ordinal;
-        command.Parameters[2].Value = message;
+        SetParameterValues(command, snapshotId, ordinal, message);
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
@@ -1317,14 +1318,15 @@ public sealed partial class SqliteSnapshotStore : IDisposable
         DocumentDependencySummary dependency,
         CancellationToken cancellationToken)
     {
-        command.Parameters[0].Value = snapshotId;
-        command.Parameters[1].Value = dependency.SourceDocumentId;
-        command.Parameters[2].Value = dependency.TargetDocumentId;
-        command.Parameters[3].Value = dependency.ReferenceCount;
-        command.Parameters[4].Value = (object?)dependency.SampleFilePath ?? DBNull.Value;
-        command.Parameters[5].Value = (object?)dependency.SampleLineNumber ?? DBNull.Value;
-        command.Parameters[6].Value = (object?)dependency.SampleSnippet ?? DBNull.Value;
-
+        SetParameterValues(
+            command,
+            snapshotId,
+            dependency.SourceDocumentId,
+            dependency.TargetDocumentId,
+            dependency.ReferenceCount,
+            dependency.SampleFilePath,
+            dependency.SampleLineNumber,
+            dependency.SampleSnippet);
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
@@ -1334,16 +1336,17 @@ public sealed partial class SqliteSnapshotStore : IDisposable
         SymbolDependencySummary dependency,
         CancellationToken cancellationToken)
     {
-        command.Parameters[0].Value = snapshotId;
-        command.Parameters[1].Value = dependency.SourceSymbolId;
-        command.Parameters[2].Value = dependency.TargetSymbolId;
-        command.Parameters[3].Value = dependency.ReferenceCount;
-        command.Parameters[4].Value = dependency.ReferenceKind;
-        command.Parameters[5].Value = dependency.Confidence;
-        command.Parameters[6].Value = (object?)dependency.SampleFilePath ?? DBNull.Value;
-        command.Parameters[7].Value = (object?)dependency.SampleLineNumber ?? DBNull.Value;
-        command.Parameters[8].Value = (object?)dependency.SampleSnippet ?? DBNull.Value;
-
+        SetParameterValues(
+            command,
+            snapshotId,
+            dependency.SourceSymbolId,
+            dependency.TargetSymbolId,
+            dependency.ReferenceCount,
+            dependency.ReferenceKind,
+            dependency.Confidence,
+            dependency.SampleFilePath,
+            dependency.SampleLineNumber,
+            dependency.SampleSnippet);
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
@@ -1354,20 +1357,24 @@ public sealed partial class SqliteSnapshotStore : IDisposable
         DependencyCycleSummary cycle,
         CancellationToken cancellationToken)
     {
-        cycleCommand.Parameters[0].Value = snapshotId;
-        cycleCommand.Parameters[1].Value = cycle.CycleId;
-        cycleCommand.Parameters[2].Value = cycle.GraphKind;
-        cycleCommand.Parameters[3].Value = cycle.EdgeCount;
-        cycleCommand.Parameters[4].Value = cycle.NodeIds.Count;
+        SetParameterValues(
+            cycleCommand,
+            snapshotId,
+            cycle.CycleId,
+            cycle.GraphKind,
+            cycle.EdgeCount,
+            cycle.NodeIds.Count);
         await cycleCommand.ExecuteNonQueryAsync(cancellationToken);
 
         for (int index = 0; index < cycle.NodeIds.Count; index++)
         {
-            cycleNodeCommand.Parameters[0].Value = snapshotId;
-            cycleNodeCommand.Parameters[1].Value = cycle.CycleId;
-            cycleNodeCommand.Parameters[2].Value = cycle.GraphKind;
-            cycleNodeCommand.Parameters[3].Value = cycle.NodeIds[index];
-            cycleNodeCommand.Parameters[4].Value = index;
+            SetParameterValues(
+                cycleNodeCommand,
+                snapshotId,
+                cycle.CycleId,
+                cycle.GraphKind,
+                cycle.NodeIds[index],
+                index);
             await cycleNodeCommand.ExecuteNonQueryAsync(cancellationToken);
         }
     }
@@ -1382,9 +1389,14 @@ public sealed partial class SqliteSnapshotStore : IDisposable
         command.CommandText =
             """
             SELECT snapshot_id
-            FROM snapshots
-            ORDER BY snapshot_id DESC
-            LIMIT -1 OFFSET $keepCount;
+            FROM snapshots AS snapshot
+            WHERE (
+                SELECT COUNT(*)
+                FROM snapshots AS newer
+                WHERE newer.solution_path = snapshot.solution_path
+                  AND newer.snapshot_id > snapshot.snapshot_id
+            ) >= $keepCount
+            ORDER BY snapshot_id DESC;
             """;
         command.Parameters.AddWithValue("$keepCount", MaxSnapshotsToKeep);
 
@@ -2018,35 +2030,7 @@ public sealed partial class SqliteSnapshotStore : IDisposable
 
     private static string NormalizeWorkspacePathForStorage(string workspacePath)
     {
-        string candidate = workspacePath.Trim();
-        if (candidate.Length == 0)
-        {
-            return string.Empty;
-        }
-
-        try
-        {
-            candidate = Path.GetFullPath(candidate);
-        }
-        catch (ArgumentException)
-        {
-            return OperatingSystem.IsWindows()
-                ? candidate.ToUpperInvariant()
-                : candidate;
-        }
-
-        string root = Path.GetPathRoot(candidate) ?? string.Empty;
-        StringComparison comparison = OperatingSystem.IsWindows()
-            ? StringComparison.OrdinalIgnoreCase
-            : StringComparison.Ordinal;
-        if (!string.Equals(candidate, root, comparison))
-        {
-            candidate = candidate.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        }
-
-        return OperatingSystem.IsWindows()
-            ? candidate.ToUpperInvariant()
-            : candidate;
+        return PathNormalization.NormalizeDirectoryLikePath(workspacePath, uppercaseWindows: true);
     }
 
     private static string BuildLegacyDocumentId(string projectName, string documentName, string? documentFilePath)
@@ -2091,6 +2075,36 @@ public sealed partial class SqliteSnapshotStore : IDisposable
         command.Transaction = transaction;
         command.CommandText = sql;
         await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static SqliteCommand CreateParameterizedCommand(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        string commandText,
+        params (string Name, object? DefaultValue)[] parameters)
+    {
+        SqliteCommand command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = commandText;
+        foreach ((string name, object? defaultValue) in parameters)
+        {
+            command.Parameters.AddWithValue(name, defaultValue ?? DBNull.Value);
+        }
+
+        return command;
+    }
+
+    private static void SetParameterValues(SqliteCommand command, params object?[] values)
+    {
+        if (command.Parameters.Count != values.Length)
+        {
+            throw new InvalidOperationException("The number of values must match the prepared command parameters.");
+        }
+
+        for (int index = 0; index < values.Length; index++)
+        {
+            command.Parameters[index].Value = values[index] ?? DBNull.Value;
+        }
     }
 
     private static async Task EnsureColumnExistsAsync(

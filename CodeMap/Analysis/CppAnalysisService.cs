@@ -11,7 +11,7 @@ using System.Xml.Linq;
 
 namespace CodeMap.Analysis;
 
-public sealed class CppAnalysisService
+public sealed partial class CppAnalysisService
 {
     private static readonly Regex s_slnProjectPattern = new(
         @"^\s*Project\([^)]*\)\s*=\s*""[^""]+"",\s*""(?<path>[^""]+)""\s*,",
@@ -163,6 +163,7 @@ public sealed class CppAnalysisService
             new AnalysisProgressUpdate(AnalysisProgressStage.DiscoveringNativeProjects, normalizedInputPath));
         List<string> diagnostics = [];
         string workspaceRootPath = ResolveWorkspaceRootPath(normalizedInputPath);
+        string? solutionPath = ResolveSolutionPath(normalizedInputPath);
         if (Directory.Exists(normalizedInputPath))
         {
             CppProjectAnalysisResult folderResult = await AnalyzeFolderAsync(
@@ -192,6 +193,7 @@ public sealed class CppAnalysisService
                 CppProjectAnalysisResult result = await AnalyzeProjectAsync(
                     projectPath,
                     workspaceRootPath,
+                    solutionPath,
                     diagnostics,
                     normalizedInputPath,
                     progress,
@@ -288,6 +290,7 @@ public sealed class CppAnalysisService
     private static async Task<CppProjectAnalysisResult> AnalyzeProjectAsync(
         string projectPath,
         string workspaceRootPath,
+        string? solutionPath,
         ICollection<string> diagnostics,
         string workspacePath,
         IProgress<AnalysisProgressUpdate>? progress,
@@ -307,7 +310,8 @@ public sealed class CppAnalysisService
             [rootProjectDocument],
             projectPath,
             workspaceRootPath,
-            projectName);
+            projectName,
+            solutionPath);
         IReadOnlyList<ProjectXmlDocument> projectDocuments = LoadProjectDocuments(
             rootProjectDocument,
             importResolutionContext,
@@ -317,7 +321,8 @@ public sealed class CppAnalysisService
             projectDocuments,
             projectPath,
             workspaceRootPath,
-            projectName);
+            projectName,
+            solutionPath);
         diagnostics.Add(T(
             "diag.cpp.projectEvaluation",
             projectName,
@@ -901,6 +906,7 @@ public sealed class CppAnalysisService
             }
 
             documents.Add(current);
+            evaluationContext.ApplyProjectProperties([current]);
 
             foreach (XElement importElement in current.Document.Descendants()
                 .Where(element => string.Equals(element.Name.LocalName, "Import", StringComparison.Ordinal)))
@@ -3246,7 +3252,7 @@ public sealed class CppAnalysisService
         string normalized = StripWrappingParentheses(expression);
         if (string.IsNullOrWhiteSpace(normalized))
         {
-            return true;
+            return false;
         }
 
         if (TrySplitCondition(normalized, "Or", out IReadOnlyList<string>? orTerms))
@@ -3849,6 +3855,18 @@ public sealed class CppAnalysisService
         return Path.GetDirectoryName(inputPath) ?? Directory.GetCurrentDirectory();
     }
 
+    private static string? ResolveSolutionPath(string inputPath)
+    {
+        string extension = Path.GetExtension(inputPath);
+        if (string.Equals(extension, ".sln", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(extension, ".slnx", StringComparison.OrdinalIgnoreCase))
+        {
+            return inputPath;
+        }
+
+        return null;
+    }
+
     private static bool IsPathUnderRoot(string candidatePath, string rootPath)
     {
         string normalizedRoot = EnsureDirectorySeparatorSuffix(Path.GetFullPath(rootPath));
@@ -4046,12 +4064,20 @@ public sealed class CppAnalysisService
         IReadOnlyList<ProjectXmlDocument> projectDocuments,
         string projectPath,
         string workspaceRootPath,
-        string projectName)
+        string projectName,
+        string? solutionPath)
     {
         string projectDirectory = Path.GetDirectoryName(projectPath) ?? workspaceRootPath;
         (string configuration, string platform) = ResolveBuildConfiguration(projectDocument);
 
-        MsBuildEvaluationContext evaluationContext = new(projectName, projectPath, projectDirectory, workspaceRootPath, configuration, platform);
+        MsBuildEvaluationContext evaluationContext = new(
+            projectName,
+            projectPath,
+            projectDirectory,
+            workspaceRootPath,
+            configuration,
+            platform,
+            solutionPath);
         evaluationContext.ApplyProjectProperties(projectDocuments);
         return evaluationContext;
     }
@@ -4076,7 +4102,7 @@ public sealed class CppAnalysisService
                 string propertyName = match.Groups["name"].Value.Trim();
                 return evaluationContext.TryResolveProperty(propertyName, out string? resolvedValue)
                     ? resolvedValue
-                    : match.Value;
+                    : string.Empty;
             });
 
             if (string.Equals(next, expanded, StringComparison.Ordinal))
@@ -4252,14 +4278,14 @@ public sealed class CppAnalysisService
             string projectDirectory,
             string workspaceRootPath,
             string configuration,
-            string platform)
+            string platform,
+            string? solutionPath)
         {
             ProjectDirectory = projectDirectory;
             Configuration = configuration;
             Platform = platform;
 
             string normalizedProjectDirectory = EnsureDirectorySeparatorSuffix(Path.GetFullPath(projectDirectory));
-            string normalizedWorkspaceRootPath = EnsureDirectorySeparatorSuffix(Path.GetFullPath(workspaceRootPath));
 
             _properties = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
             {
@@ -4268,11 +4294,18 @@ public sealed class CppAnalysisService
                 ["ProjectPath"] = Path.GetFullPath(projectPath),
                 ["ProjectFileName"] = Path.GetFileName(projectPath),
                 ["ProjectName"] = projectName,
-                ["SolutionDir"] = normalizedWorkspaceRootPath,
-                ["SolutionPath"] = Path.Combine(normalizedWorkspaceRootPath, Path.GetFileName(projectPath)),
                 ["Configuration"] = configuration,
                 ["Platform"] = platform
             };
+
+            if (!string.IsNullOrWhiteSpace(solutionPath))
+            {
+                string normalizedSolutionPath = Path.GetFullPath(solutionPath);
+                string normalizedSolutionDirectory = EnsureDirectorySeparatorSuffix(
+                    Path.GetDirectoryName(normalizedSolutionPath) ?? workspaceRootPath);
+                _properties["SolutionDir"] = normalizedSolutionDirectory;
+                _properties["SolutionPath"] = normalizedSolutionPath;
+            }
         }
 
         public string ProjectDirectory { get; }

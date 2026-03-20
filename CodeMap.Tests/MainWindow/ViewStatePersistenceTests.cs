@@ -74,7 +74,7 @@ public sealed class ViewStatePersistenceTests
     }
 
     [Fact]
-    public void NormalizeSolutionPath_BlankReturnsEmpty_AndRelativePathReturnsFullPath()
+    public void NormalizeSolutionPath_BlankReturnsEmpty_AndDirectoryPathsAreCanonicalized()
     {
         Assert.Equal(string.Empty, CodeMap.MainWindow.TestNormalizeSolutionPath(" \t "));
 
@@ -82,5 +82,25 @@ public sealed class ViewStatePersistenceTests
         string normalized = CodeMap.MainWindow.TestNormalizeSolutionPath(relative);
 
         Assert.Equal(System.IO.Path.GetFullPath(relative), normalized);
+
+        string directoryPath = System.IO.Path.Combine(
+            System.IO.Path.GetTempPath(),
+            "CodeMapViewStateTests",
+            Guid.NewGuid().ToString("N"));
+        System.IO.Directory.CreateDirectory(directoryPath);
+        try
+        {
+            string withTrailingSeparator = directoryPath + System.IO.Path.DirectorySeparatorChar;
+            Assert.Equal(
+                CodeMap.MainWindow.TestNormalizeSolutionPath(directoryPath),
+                CodeMap.MainWindow.TestNormalizeSolutionPath(withTrailingSeparator));
+        }
+        finally
+        {
+            if (System.IO.Directory.Exists(directoryPath))
+            {
+                System.IO.Directory.Delete(directoryPath, recursive: true);
+            }
+        }
     }
 }

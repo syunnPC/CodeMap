@@ -278,6 +278,7 @@ public sealed partial class MainWindow : Window
     {
         ScheduleJsonFileWrite(
             ref _appPreferencesSaveCancellationTokenSource,
+            _appPreferencesSaveCoordinator,
             s_appPreferencesFilePath,
             _appPreferences,
             "アプリ設定の保存に失敗",
@@ -286,8 +287,14 @@ public sealed partial class MainWindow : Window
 
     private void SaveAppPreferencesImmediately()
     {
+        long scheduledVersion = _appPreferencesSaveCoordinator.AdvanceVersion();
         CancelPendingSave(ref _appPreferencesSaveCancellationTokenSource);
-        WriteJsonFileImmediately(s_appPreferencesFilePath, _appPreferences, "アプリ設定の保存に失敗");
+        WriteJsonFileImmediately(
+            s_appPreferencesFilePath,
+            _appPreferences,
+            "アプリ設定の保存に失敗",
+            _appPreferencesSaveCoordinator,
+            scheduledVersion);
     }
 
     private void ClearAppPreferencesSaveTokenSource(CancellationTokenSource cancellationTokenSource)

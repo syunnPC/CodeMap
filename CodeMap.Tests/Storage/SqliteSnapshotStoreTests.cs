@@ -136,6 +136,35 @@ public sealed class SqliteSnapshotStoreTests
     }
 
     [Fact]
+    public async Task SaveSnapshotAsync_PrunesPerWorkspaceWithoutDeletingOtherWorkspaceCaches()
+    {
+        using TemporaryWorkspace workspace = new();
+        using SqliteSnapshotStore store = new(workspace.DatabasePath);
+        string otherWorkspacePath = Path.Combine(workspace.RootPath, "other-workspace");
+        Directory.CreateDirectory(otherWorkspacePath);
+
+        await store.SaveSnapshotAsync(CreateSnapshot(otherWorkspacePath, diagnostic: "other"));
+
+        for (int index = 0; index < 25; index++)
+        {
+            await store.SaveSnapshotAsync(CreateSnapshot(
+                workspace.RootPath,
+                analyzedAt: DateTimeOffset.UtcNow.AddMinutes(index),
+                diagnostic: $"diag-{index}"));
+        }
+
+        SolutionAnalysisSnapshot? primaryLoaded = await store.TryLoadLatestSnapshotAsync(workspace.RootPath);
+        SolutionAnalysisSnapshot? otherLoaded = await store.TryLoadLatestSnapshotAsync(otherWorkspacePath);
+        (long count, _, _) = await ReadSnapshotIdStatsAsync(workspace.DatabasePath);
+
+        Assert.NotNull(primaryLoaded);
+        Assert.NotNull(otherLoaded);
+        Assert.Equal("diag-24", Assert.Single(primaryLoaded!.Diagnostics));
+        Assert.Equal("other", Assert.Single(otherLoaded!.Diagnostics));
+        Assert.Equal(21, count);
+    }
+
+    [Fact]
     public async Task TryLoadLatestSnapshotAsync_FormatVersionMismatch_ReturnsNull()
     {
         using TemporaryWorkspace workspace = new();
