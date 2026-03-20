@@ -11,7 +11,7 @@
   <Identity
     Name="02ce490d-50c4-4536-a19c-7ac5ae079543"
     Publisher="CN=syunn"
-    Version="1.0.0.0" />
+    Version="1.0.1.0" />
 
   <mp:PhoneIdentity PhoneProductId="02ce490d-50c4-4536-a19c-7ac5ae079543" PhonePublisherId="00000000-0000-0000-0000-000000000000"/>
 

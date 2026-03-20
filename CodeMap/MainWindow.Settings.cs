@@ -14,6 +14,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -337,8 +338,9 @@ public sealed partial class MainWindow
         DateTime buildDateLocal = !string.IsNullOrWhiteSpace(assemblyPath) && File.Exists(assemblyPath)
             ? File.GetLastWriteTime(assemblyPath)
             : DateTime.Now;
+        string notAvailable = T("common.notAvailable");
         string appVersion = fileVersionInfo is null || string.IsNullOrWhiteSpace(fileVersionInfo.ProductVersion)
-            ? assemblyVersion?.ToString() ?? "n/a"
+            ? assemblyVersion?.ToString() ?? notAvailable
             : fileVersionInfo.ProductVersion;
         string buildNumber = fileVersionInfo is null || string.IsNullOrWhiteSpace(fileVersionInfo.FileVersion)
             ? buildDateLocal.ToString("yyyyMMdd.HHmm", CultureInfo.InvariantCulture)
@@ -351,7 +353,7 @@ public sealed partial class MainWindow
         }
         catch
         {
-            webView2Version = "n/a";
+            webView2Version = notAvailable;
         }
 
         return new (string Label, string Value)[]
@@ -359,11 +361,13 @@ public sealed partial class MainWindow
             (T("settings.about.version"), appVersion),
             (T("settings.about.buildNumber"), buildNumber),
             (T("settings.about.buildDate"), buildDateLocal.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture)),
+            (T("settings.about.component.architecture"), RuntimeInformation.ProcessArchitecture.ToString()),
             (T("settings.about.component.dotnet"), Environment.Version.ToString()),
-            (T("settings.about.component.winappsdk"), typeof(Application).Assembly.GetName().Version?.ToString() ?? "n/a"),
+            (T("settings.about.component.winappsdk"), typeof(Application).Assembly.GetName().Version?.ToString() ?? notAvailable),
             (T("settings.about.component.webview2"), webView2Version),
-            (T("settings.about.component.roslyn"), typeof(Compilation).Assembly.GetName().Version?.ToString() ?? "n/a"),
-            (T("settings.about.component.sqlite"), typeof(SqliteConnection).Assembly.GetName().Version?.ToString() ?? "n/a"),
+            (T("settings.about.component.roslyn"), typeof(Compilation).Assembly.GetName().Version?.ToString() ?? notAvailable),
+            (T("settings.about.component.sqlite"), typeof(SqliteConnection).Assembly.GetName().Version?.ToString() ?? notAvailable),
+            (T("settings.about.component.clangsharp"), typeof(ClangSharp.Interop.CXIndex).Assembly.GetName().Version?.ToString() ?? notAvailable),
             (T("settings.about.component.graphUi"), GraphUiVersion)
         };
     }
@@ -447,7 +451,7 @@ public sealed partial class MainWindow
         }
         catch (Exception ex)
         {
-            AppendDiagnosticsLine($"ローカルデータの完全クリアに失敗しました: {ex}");
+            AppendLocalizedDiagnostics("diag.settings.localDataClearFailed", ex.Message);
             UpdateStatus(T("status.localDataClearFailed", ex.Message), StatusSeverity.Error);
             return false;
         }
@@ -760,7 +764,7 @@ public sealed partial class MainWindow
         }
         catch (Exception ex)
         {
-            AppendDiagnosticsLine($"WebView2 キャッシュのクリアに失敗しました: {ex.Message}");
+            AppendLocalizedDiagnostics("diag.settings.webView2CacheClearFailed", ex.Message);
         }
 
         try
@@ -769,7 +773,7 @@ public sealed partial class MainWindow
         }
         catch (Exception ex)
         {
-            AppendDiagnosticsLine($"WebView2 Cookie のクリアに失敗しました: {ex.Message}");
+            AppendLocalizedDiagnostics("diag.settings.webView2CookiesClearFailed", ex.Message);
         }
 
         try
@@ -780,7 +784,7 @@ public sealed partial class MainWindow
         }
         catch (Exception ex)
         {
-            AppendDiagnosticsLine($"WebView2 ストレージのクリアに失敗しました: {ex.Message}");
+            AppendLocalizedDiagnostics("diag.settings.webView2StorageClearFailed", ex.Message);
         }
     }
 
@@ -795,7 +799,7 @@ public sealed partial class MainWindow
         }
         catch (Exception ex)
         {
-            AppendDiagnosticsLine($"WebView2 データ削除予約に失敗しました: {ex.Message}");
+            AppendLocalizedDiagnostics("diag.settings.webView2CleanupMarkerFailed", ex.Message);
         }
     }
 
@@ -811,16 +815,16 @@ public sealed partial class MainWindow
             TryDeleteDirectoryIfExists(s_webView2UserDataDirectoryPath, "WebView2 データ");
             if (Directory.Exists(s_webView2UserDataDirectoryPath))
             {
-                AppendDiagnosticsLine("予約済みの WebView2 データ削除を完了できなかったため、次回起動時に再試行します。");
+                AppendLocalizedDiagnostics("diag.settings.webView2CleanupPendingRetry");
                 return;
             }
 
             File.Delete(s_webView2CleanupMarkerFilePath);
-            AppendDiagnosticsLine("予約済みの WebView2 データ削除を完了しました。");
+            AppendLocalizedDiagnostics("diag.settings.webView2CleanupCompleted");
         }
         catch (Exception ex)
         {
-            AppendDiagnosticsLine($"予約済みの WebView2 データ削除に失敗しました: {ex.Message}");
+            AppendLocalizedDiagnostics("diag.settings.webView2CleanupFailed", ex.Message);
         }
     }
 
@@ -835,7 +839,7 @@ public sealed partial class MainWindow
         }
         catch (Exception ex)
         {
-            AppendDiagnosticsLine($"{label}の削除に失敗しました: {ex.Message}");
+            AppendLocalizedDiagnostics("diag.settings.fileDeleteFailed", label, ex.Message);
         }
     }
 
@@ -850,7 +854,7 @@ public sealed partial class MainWindow
         }
         catch (Exception ex)
         {
-            AppendDiagnosticsLine($"{label}の削除に失敗しました: {ex.Message}");
+            AppendLocalizedDiagnostics("diag.settings.directoryDeleteFailed", label, ex.Message);
         }
     }
 
@@ -865,7 +869,7 @@ public sealed partial class MainWindow
         }
         catch (Exception ex)
         {
-            AppendDiagnosticsLine($"{label}のクリアに失敗しました: {ex.Message}");
+            AppendLocalizedDiagnostics("diag.settings.fileClearFailed", label, ex.Message);
         }
     }
 

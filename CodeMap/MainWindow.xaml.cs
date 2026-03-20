@@ -59,7 +59,7 @@ public sealed partial class MainWindow : Window
         Failed = 3
     }
 
-    private const string GraphUiVersion = "graph-ui-20260313a";
+    private const string GraphUiVersion = "graph-ui-20260321a";
 
     private string BrowseFileOptionLabel => T("browse.solutionFile");
 
@@ -171,6 +171,31 @@ public sealed partial class MainWindow : Window
     private string T(string key, params object[] args)
     {
         return AppLocalization.Get(_currentLocale, key, args);
+    }
+
+    private void AppendLocalizedDiagnostics(string key, params object[] args)
+    {
+        AppendDiagnosticsLine(T(key, args));
+    }
+
+    private string ResolveGraphErrorMessage(string? message)
+    {
+        return string.IsNullOrWhiteSpace(message)
+            ? T("common.notAvailable")
+            : message;
+    }
+
+    private string ResolveNodeFocusFailureReason(string? reason)
+    {
+        string normalizedReason = reason?.Trim() ?? string.Empty;
+        return normalizedReason switch
+        {
+            "invalid-focus-request" => T("graph.reason.invalidFocusRequest"),
+            "node-not-found" => T("graph.reason.nodeNotFound"),
+            _ => string.IsNullOrWhiteSpace(normalizedReason)
+                ? T("common.notAvailable")
+                : normalizedReason
+        };
     }
 
     private void LoadAppPreferences()
@@ -364,7 +389,7 @@ public sealed partial class MainWindow : Window
         catch (Exception ex)
         {
             _isGraphFrontendReady = false;
-            AppendDiagnosticsLine($"グラフ ロケール送信に失敗しました: {ex.Message}");
+            AppendLocalizedDiagnostics("diag.graph.localeSendFailed", ex.Message);
             _ = RecoverGraphFrontendAsync(GraphRecoveryMode.RecreateControl);
         }
     }
@@ -391,7 +416,7 @@ public sealed partial class MainWindow : Window
         catch (Exception ex)
         {
             _isGraphFrontendReady = false;
-            AppendDiagnosticsLine($"グラフ テーマ送信に失敗しました: {ex.Message}");
+            AppendLocalizedDiagnostics("diag.graph.themeSendFailed", ex.Message);
             _ = RecoverGraphFrontendAsync(GraphRecoveryMode.RecreateControl);
         }
     }
@@ -473,7 +498,7 @@ public sealed partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            AppendDiagnosticsLine($"初期化に失敗しました: {ex.Message}");
+            AppendLocalizedDiagnostics("diag.init.failed", ex.Message);
             UpdateStatus(StatusCode.InitFailed);
             SetGraphRecoveryOverlay(isVisible: true, T("status.initFailedRetry"));
             LogError($"Window initialization failed: {ex}");
@@ -865,7 +890,7 @@ public sealed partial class MainWindow : Window
                 UpdateStatus(StatusCode.CacheFailed, ex.Message);
             }
 
-            AppendDiagnosticsLine($"キャッシュ読込に失敗しました: {ex}");
+            AppendLocalizedDiagnostics("diag.cache.loadFailed", ex.Message);
             LogError($"Load snapshot cache failed: {ex}");
             return SnapshotLoadResult.Failed;
         }
@@ -1559,11 +1584,6 @@ public sealed partial class MainWindow : Window
 
     private void UpdateAnalysisProgressDisplay(AnalysisProgressUpdate update)
     {
-        if (_isCacheClearReanalysisInProgress)
-        {
-            return;
-        }
-
         string detail = BuildAnalysisProgressDetail(update);
         if (string.IsNullOrWhiteSpace(detail))
         {
@@ -1579,7 +1599,7 @@ public sealed partial class MainWindow : Window
         if (_activeAnalyzeOperationCount > 0)
         {
             UpdateStatus(
-                T("status.analyzingDetail", detail),
+                ResolveGraphRecoveryOverlayMessage(isAnalyzing: true),
                 GetStatusSeverity(StatusCode.Analyzing),
                 suppressLog: true);
         }
@@ -1669,9 +1689,11 @@ public sealed partial class MainWindow : Window
 
     private string ResolveGraphRecoveryOverlayMessage(bool isAnalyzing)
     {
-        if (_isCacheClearReanalysisInProgress)
+        if (_isCacheClearReanalysisInProgress && isAnalyzing)
         {
-            return T("status.localDataReanalyzingWithRestore");
+            return string.IsNullOrWhiteSpace(_analysisProgressDetail)
+                ? T("status.localDataReanalyzingWithRestore")
+                : T("status.localDataReanalyzingDetail", _analysisProgressDetail);
         }
 
         if (isAnalyzing)
@@ -1679,6 +1701,11 @@ public sealed partial class MainWindow : Window
             return string.IsNullOrWhiteSpace(_analysisProgressDetail)
                 ? T("status.analyzing")
                 : T("status.analyzingDetail", _analysisProgressDetail);
+        }
+
+        if (_isCacheClearReanalysisInProgress)
+        {
+            return T("status.localDataReanalyzingWithRestore");
         }
 
         if (!string.IsNullOrWhiteSpace(_graphRecoveryOverlayMessage))
@@ -1834,7 +1861,7 @@ public sealed partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            AppendDiagnosticsLine($"WebView2 の初期化に失敗しました: {ex.Message}");
+            AppendLocalizedDiagnostics("diag.graph.webView2InitFailed", ex.Message);
             LogError($"WebView2 initialization failed: {ex}");
             ScheduleGraphFrontendRetry(GraphRecoveryMode.RecreateControl, StatusCode.GraphInitFailedRetrying);
         }
@@ -1877,7 +1904,7 @@ public sealed partial class MainWindow : Window
 
         if (!isSuccess)
         {
-            AppendDiagnosticsLine($"グラフ フロントエンドのナビゲーションに失敗しました: {webErrorStatus}");
+            AppendLocalizedDiagnostics("diag.graph.navigationFailed", webErrorStatus);
             ScheduleGraphFrontendRetry(GraphRecoveryMode.RecreateControl, StatusCode.GraphInitFailedRetrying);
             return;
         }
@@ -1894,7 +1921,7 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        string processFailureMessage = $"グラフ Web プロセスが異常終了しました: 種別={args.ProcessFailedKind}, 理由={args.Reason}";
+        string processFailureMessage = T("diag.graph.processFailed", args.ProcessFailedKind, args.Reason);
         string processDescription = args.ProcessDescription ?? string.Empty;
         CoreWebView2ProcessFailedKind failedKind = args.ProcessFailedKind;
 
@@ -1929,7 +1956,7 @@ public sealed partial class MainWindow : Window
         AppendDiagnosticsLine(processFailureMessage);
         if (!string.IsNullOrWhiteSpace(processDescription))
         {
-            AppendDiagnosticsLine($"グラフ Web プロセス詳細: {processDescription}");
+            AppendLocalizedDiagnostics("diag.graph.processDetail", processDescription);
         }
 
         _isGraphFrontendReady = false;
@@ -1964,7 +1991,7 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        string message = $"グラフ Browser プロセスが終了しました: kind={args.BrowserProcessExitKind}";
+        string message = T("diag.graph.browserProcessExited", args.BrowserProcessExitKind);
         if (DispatcherQueue is not null && !DispatcherQueue.HasThreadAccess)
         {
             bool enqueued = DispatcherQueue.TryEnqueue(() =>
@@ -2011,7 +2038,7 @@ public sealed partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            AppendDiagnosticsLine($"レイアウト変更の処理に失敗しました: {ex.Message}");
+            AppendLocalizedDiagnostics("diag.graph.layoutChangeFailed", ex.Message);
         }
     }
 
@@ -2031,7 +2058,7 @@ public sealed partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            AppendDiagnosticsLine($"グラフ領域サイズ変更の処理に失敗しました: {ex.Message}");
+            AppendLocalizedDiagnostics("diag.graph.surfaceResizeFailed", ex.Message);
         }
     }
 
@@ -2087,7 +2114,7 @@ public sealed partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            AppendDiagnosticsLine($"グラフ描画領域の再調整に失敗しました: {ex.Message}");
+            AppendLocalizedDiagnostics("diag.graph.surfaceAdjustFailed", ex.Message);
         }
         finally
         {
@@ -2104,7 +2131,7 @@ public sealed partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            AppendDiagnosticsLine($"グラフ メッセージの読み取りに失敗しました: {ex.Message}");
+            AppendLocalizedDiagnostics("diag.graph.messageReadFailed", ex.Message);
             return;
         }
 
@@ -2162,8 +2189,23 @@ public sealed partial class MainWindow : Window
                         string hasSymbolTypeFilters = TryGetString(root, "hasSymbolTypeFilters");
                         string hasSearchInput = TryGetString(root, "hasSearchInput");
                         string location = TryGetString(root, "location");
-                        AppendDiagnosticsLine(
-                            $"Graph UI version: {version}, dependencyMapModeToggle={hasDependencyMapModeToggle}, impactModeToggle={hasImpactAnalysisModeToggle}, showCyclesOnlyToggle={hasShowCyclesOnlyToggle}, dependencyMapDirectionSelect={hasDependencyMapDirectionSelect}, projectsToggle={hasProjectsToggle}, documentsToggle={hasDocumentsToggle}, packagesToggle={hasPackagesToggle}, symbolsToggle={hasSymbolsToggle}, assembliesToggle={hasAssembliesToggle}, docDepsToggle={hasDocumentDependenciesToggle}, symbolDepsToggle={hasSymbolDependenciesToggle}, symbolTypeFilters={hasSymbolTypeFilters}, searchInput={hasSearchInput}, location={location}");
+                        AppendLocalizedDiagnostics(
+                            "diag.graph.uiVersion",
+                            version,
+                            hasDependencyMapModeToggle,
+                            hasImpactAnalysisModeToggle,
+                            hasShowCyclesOnlyToggle,
+                            hasDependencyMapDirectionSelect,
+                            hasProjectsToggle,
+                            hasDocumentsToggle,
+                            hasPackagesToggle,
+                            hasSymbolsToggle,
+                            hasAssembliesToggle,
+                            hasDocumentDependenciesToggle,
+                            hasSymbolDependenciesToggle,
+                            hasSymbolTypeFilters,
+                            hasSearchInput,
+                            location);
                         break;
                     }
 
@@ -2171,6 +2213,7 @@ public sealed partial class MainWindow : Window
                     ResetGraphFrontendRetryState();
                     _isGraphFrontendReady = true;
                     _isGraphContentRendered = false;
+                    QueueLatestGraphViewStateForFrontend();
                     if (string.IsNullOrWhiteSpace(_pendingGraphPayloadJson) && !string.IsNullOrWhiteSpace(_lastGraphPayloadJson))
                     {
                         _pendingGraphPayloadJson = _lastGraphPayloadJson;
@@ -2253,8 +2296,9 @@ public sealed partial class MainWindow : Window
                     {
                         string targetNodeId = TryGetString(root, "nodeId");
                         string reason = TryGetString(root, "reason");
-                        UpdateStatus(StatusCode.NodeFocusFailed, reason);
-                        AppendDiagnosticsLine($"Node focus failed: nodeId={targetNodeId}, reason={reason}");
+                        string localizedReason = ResolveNodeFocusFailureReason(reason);
+                        UpdateStatus(StatusCode.NodeFocusFailed, localizedReason);
+                        AppendLocalizedDiagnostics("diag.graph.nodeFocusFailed", targetNodeId, localizedReason);
 
                         if (_graphPayloadCompleteness != GraphPayloadCompleteness.Full &&
                             string.Equals(reason, "node-not-found", StringComparison.OrdinalIgnoreCase) &&
@@ -2302,7 +2346,7 @@ public sealed partial class MainWindow : Window
                         string? errorMessage = errorMessageProperty.GetString();
                         if (!string.IsNullOrWhiteSpace(errorMessage))
                         {
-                        AppendDiagnosticsLine($"グラフ エラー: {errorMessage}");
+                            AppendLocalizedDiagnostics("diag.graph.error", ResolveGraphErrorMessage(errorMessage));
                         }
                     }
                     break;
@@ -2311,7 +2355,7 @@ public sealed partial class MainWindow : Window
                     {
                         int receivedNodes = TryGetInt(root, "nodeCount");
                         int receivedEdges = TryGetInt(root, "edgeCount");
-                        AppendDiagnosticsLine($"グラフ メッセージを Web 側が受信しました: nodes={receivedNodes}, edges={receivedEdges}");
+                        AppendLocalizedDiagnostics("diag.graph.messageReceived", receivedNodes, receivedEdges);
                         break;
                     }
 
@@ -2368,15 +2412,37 @@ public sealed partial class MainWindow : Window
                             UpdateStatus(StatusCode.GraphRenderedSimple);
                         }
                         PersistActiveGraphViewState(graphViewState);
-                        AppendDiagnosticsLine(
-                            $"Graph rendered by web[{frameTag}]: nodes={renderedNodes}, edges={renderedEdges}, includeProjects={includeProjects}, includeDocuments={includeDocuments}, includePackages={includePackages}, includeSymbols={includeSymbols}, includeAssemblies={includeAssemblies}, includeNativeDependencies={includeNativeDependencies}, docDeps={includeDocumentDependencies}, symbolDeps={includeSymbolDependencies}, mapMode={isDependencyMapMode}, impactMode={isImpactAnalysisMode}, showCyclesOnly={showCyclesOnly}, mapDirection={graphViewState.DependencyMapDirection}, pinnedNodes={graphViewState.PinnedNodes.Count}, panelWidth={graphViewState.PanelWidth}, mobilePanelHeight={graphViewState.MobilePanelHeight}, searchMatches={searchMatchCount}, size={containerWidth}x{containerHeight}, zoom={zoom}");
+                        AppendLocalizedDiagnostics(
+                            "diag.graph.renderedByWeb",
+                            frameTag,
+                            renderedNodes,
+                            renderedEdges,
+                            includeProjects,
+                            includeDocuments,
+                            includePackages,
+                            includeSymbols,
+                            includeAssemblies,
+                            includeNativeDependencies,
+                            includeDocumentDependencies,
+                            includeSymbolDependencies,
+                            isDependencyMapMode,
+                            isImpactAnalysisMode,
+                            showCyclesOnly,
+                            graphViewState.DependencyMapDirection,
+                            graphViewState.PinnedNodes.Count,
+                            graphViewState.PanelWidth,
+                            graphViewState.MobilePanelHeight,
+                            searchMatchCount,
+                            containerWidth,
+                            containerHeight,
+                            zoom);
                         if (s_enableVerboseGraphRenderDiagnostics)
                         {
                             int boundsX1 = TryGetInt(root, "boundsX1");
                             int boundsY1 = TryGetInt(root, "boundsY1");
                             int boundsX2 = TryGetInt(root, "boundsX2");
                             int boundsY2 = TryGetInt(root, "boundsY2");
-                            AppendDiagnosticsLine($"グラフ境界: ({boundsX1},{boundsY1})-({boundsX2},{boundsY2})");
+                            AppendLocalizedDiagnostics("diag.graph.bounds", boundsX1, boundsY1, boundsX2, boundsY2);
                         }
                         if (GraphWebView.ActualHeight < GraphSurfaceCollapsedHeightThreshold)
                         {
@@ -2401,14 +2467,19 @@ public sealed partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            AppendDiagnosticsLine($"グラフ メッセージの解析に失敗しました: {ex.Message}");
+            AppendLocalizedDiagnostics("diag.graph.messageParseFailed", ex.Message);
         }
     }
 
     private void QueueGraphRender(SolutionAnalysisSnapshot snapshot)
     {
         int requestVersion = Interlocked.Increment(ref _graphRenderRequestVersion);
-        bool includeSymbolsByDefault = _pendingGraphViewState?.IncludeSymbols == true;
+        GraphViewState latestGraphViewState = NormalizeGraphViewState(
+            _pendingGraphViewState ??
+            GetActiveGraphViewState() ??
+            new GraphViewState());
+        _pendingGraphViewState = latestGraphViewState;
+        bool includeSymbolsByDefault = latestGraphViewState.IncludeSymbols;
         GraphPayloadCompleteness initialCompleteness = includeSymbolsByDefault
             ? GraphPayloadCompleteness.Full
             : GraphPayloadCompleteness.StructureOnly;
@@ -2463,8 +2534,14 @@ public sealed partial class MainWindow : Window
             }
 
             string modeLabel = completeness == GraphPayloadCompleteness.Full ? "full" : "structure-only";
-            AppendDiagnosticsLine(
-                $"グラフ ペイロードをキューに追加しました: mode={modeLabel}, nodes={graphPayload.Payload.Nodes.Count}, edges={graphPayload.Payload.Edges.Count}, bytes={graphPayload.MessageBytes}, buildMs={graphPayload.BuildMilliseconds}, serializeMs={graphPayload.SerializeMilliseconds}");
+            AppendLocalizedDiagnostics(
+                "diag.graph.payloadQueued",
+                modeLabel,
+                graphPayload.Payload.Nodes.Count,
+                graphPayload.Payload.Edges.Count,
+                graphPayload.MessageBytes,
+                graphPayload.BuildMilliseconds,
+                graphPayload.SerializeMilliseconds);
             _lastGraphPayloadJson = graphPayload.MessageJson;
             _pendingGraphPayloadJson = graphPayload.MessageJson;
             _pendingGraphSearchQuery = _workspaceSearchQuery;
@@ -2484,7 +2561,7 @@ public sealed partial class MainWindow : Window
                 _isFullGraphPayloadBuildQueued = false;
             }
 
-            AppendDiagnosticsLine($"グラフ ペイロードの構築に失敗しました: {ex.Message}");
+            AppendLocalizedDiagnostics("diag.graph.payloadBuildFailed", ex.Message);
             UpdateStatus(StatusCode.GraphBuildFailed);
             SetGraphRecoveryOverlay(isVisible: true, T("status.graphRetry"));
             LogError($"Graph payload build failed: {ex}");
@@ -2503,7 +2580,7 @@ public sealed partial class MainWindow : Window
 
         int requestVersion = Volatile.Read(ref _graphRenderRequestVersion);
         _isFullGraphPayloadBuildQueued = true;
-        AppendDiagnosticsLine($"フル グラフ ペイロードを要求しました: reason={reason}");
+        AppendLocalizedDiagnostics("diag.graph.fullPayloadRequested", reason);
         _ = BuildGraphPayloadAsync(_currentSnapshot, requestVersion, GraphPayloadCompleteness.Full);
     }
 
@@ -2529,7 +2606,7 @@ public sealed partial class MainWindow : Window
         catch (Exception ex)
         {
             _isGraphFrontendReady = false;
-            AppendDiagnosticsLine($"グラフ ペイロードの送信に失敗しました: {ex.Message}");
+            AppendLocalizedDiagnostics("diag.graph.payloadSendFailed", ex.Message);
             _ = RecoverGraphFrontendAsync(GraphRecoveryMode.RecreateControl);
         }
     }
@@ -2555,9 +2632,18 @@ public sealed partial class MainWindow : Window
         catch (Exception ex)
         {
             _isGraphFrontendReady = false;
-            AppendDiagnosticsLine($"グラフ表示状態の送信に失敗しました: {ex.Message}");
+            AppendLocalizedDiagnostics("diag.graph.viewStateSendFailed", ex.Message);
             _ = RecoverGraphFrontendAsync(GraphRecoveryMode.RecreateControl);
         }
+    }
+
+    private void QueueLatestGraphViewStateForFrontend()
+    {
+        GraphViewState latestGraphViewState = NormalizeGraphViewState(
+            _pendingGraphViewState ??
+            GetActiveGraphViewState() ??
+            new GraphViewState());
+        _pendingGraphViewState = latestGraphViewState;
     }
 
     private void RequestDependencyMapForTarget(GraphSelectionTarget target)
@@ -2609,7 +2695,7 @@ public sealed partial class MainWindow : Window
         catch (Exception ex)
         {
             _isGraphFrontendReady = false;
-            AppendDiagnosticsLine($"グラフ フォーカス要求の送信に失敗しました: {ex.Message}");
+            AppendLocalizedDiagnostics("diag.graph.focusRequestSendFailed", ex.Message);
             _ = RecoverGraphFrontendAsync(GraphRecoveryMode.RecreateControl);
         }
     }
@@ -2642,7 +2728,7 @@ public sealed partial class MainWindow : Window
         catch (Exception ex)
         {
             _isGraphFrontendReady = false;
-            AppendDiagnosticsLine($"グラフ検索条件の送信に失敗しました: {ex.Message}");
+            AppendLocalizedDiagnostics("diag.graph.searchSendFailed", ex.Message);
             _ = RecoverGraphFrontendAsync(GraphRecoveryMode.RecreateControl);
         }
     }
@@ -2670,7 +2756,7 @@ public sealed partial class MainWindow : Window
         catch (Exception ex)
         {
             _isGraphFrontendReady = false;
-            AppendDiagnosticsLine($"グラフ選択解除の送信に失敗しました: {ex.Message}");
+            AppendLocalizedDiagnostics("diag.graph.clearSelectionSendFailed", ex.Message);
             _ = RecoverGraphFrontendAsync(GraphRecoveryMode.RecreateControl);
         }
     }
@@ -2791,7 +2877,7 @@ public sealed partial class MainWindow : Window
         catch (Exception ex)
         {
             _navigationHistoryService.CancelRestore();
-            AppendDiagnosticsLine($"履歴の復元に失敗しました: {ex.Message}");
+            AppendLocalizedDiagnostics("diag.history.restoreFailed", ex.Message);
         }
     }
 
@@ -3048,7 +3134,7 @@ public sealed partial class MainWindow : Window
         int attempt = Interlocked.Increment(ref _graphFrontendRetryAttemptCount);
         if (attempt > MaxGraphFrontendRetryAttempts)
         {
-            AppendDiagnosticsLine($"グラフ フロントエンドの再試行回数が上限に達しました: attempts={attempt - 1}");
+            AppendLocalizedDiagnostics("diag.graph.retryLimitReached", attempt - 1);
             SetGraphRecoveryOverlay(isVisible: true, T(GetStatusLocalizationKey(StatusCode.GraphRetry)));
             UpdateStatus(StatusCode.GraphRetry);
             return;
@@ -3087,7 +3173,7 @@ public sealed partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            AppendDiagnosticsLine($"グラフ フロントエンドの再試行に失敗しました: {ex.Message}");
+            AppendLocalizedDiagnostics("diag.graph.retryFailed", ex.Message);
             LogError($"Graph frontend retry failed: {ex}");
         }
         finally
@@ -3124,6 +3210,7 @@ public sealed partial class MainWindow : Window
 
             _isGraphFrontendReady = false;
             _isGraphContentRendered = false;
+            QueueLatestGraphViewStateForFrontend();
 
             if (recoveryMode == GraphRecoveryMode.ReloadCurrentControl && GraphWebView.CoreWebView2 is not null)
             {
@@ -3146,7 +3233,7 @@ public sealed partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            AppendDiagnosticsLine($"グラフ フロントエンドの復旧に失敗しました: {ex.Message}");
+            AppendLocalizedDiagnostics("diag.graph.recoverFailed", ex.Message);
             SetGraphRecoveryOverlay(isVisible: true, T("status.graphRetry"));
         }
         finally

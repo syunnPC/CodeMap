@@ -109,6 +109,12 @@ interface NodeReferenceStats {
   outgoingWeight: number;
 }
 
+interface VisibilityUpdateMetrics {
+  visibleNodeIds: Set<string>;
+  visibleNodeCount: number;
+  visibleEdgeCount: number;
+}
+
 interface GraphPayload {
   nodes: GraphNodePayload[];
   edges: GraphEdgePayload[];
@@ -168,7 +174,7 @@ interface ChromiumWindow extends Window {
 }
 
 declare const cytoscape: any;
-const GRAPH_UI_VERSION = "graph-ui-20260313a";
+const GRAPH_UI_VERSION = "graph-ui-20260321a";
 const PANEL_WIDTH_STORAGE_KEY = "codemap.graph.panelWidth";
 const MOBILE_PANEL_HEIGHT_STORAGE_KEY = "codemap.graph.mobilePanelHeight";
 const DEFAULT_PANEL_WIDTH = 320;
@@ -325,7 +331,15 @@ const translations: Record<Locale, Record<string, string>> = {
     "splitter.mobileAriaLabel": "グラフと詳細パネルの高さ比率を調整",
     "error.containerNotFound": "グラフ描画領域が見つかりません。",
     "error.cytoscapeNotAvailable": "Cytoscape.js の読み込みに失敗しました。",
-    "error.dependencyMapNoSelection": "依存マップを作成するにはノードを選択してください。"
+    "error.dependencyMapNoSelection": "依存マップを作成するにはノードを選択してください。",
+    "error.hostMessageParseReturnedNull": "ホスト メッセージを解析できませんでした。",
+    "error.invalidApplyViewStatePayload": "表示状態の適用メッセージが不正です。",
+    "error.invalidFocusRequest": "フォーカス要求が不正です。",
+    "error.invalidSavedViewState": "保存された表示状態ファイルが不正です。",
+    "error.invalidSearchQueryPayload": "検索条件メッセージが不正です。",
+    "error.invalidSetLocalePayload": "ロケール設定メッセージが不正です。",
+    "error.invalidSetThemePayload": "テーマ設定メッセージが不正です。",
+    "error.stateCyNull": "グラフ描画エンジンが初期化されていません。"
   },
   en: {
     "page.title": "CodeMap Graph",
@@ -463,7 +477,15 @@ const translations: Record<Locale, Record<string, string>> = {
     "splitter.mobileAriaLabel": "Resize graph and detail panel ratio",
     "error.containerNotFound": "Graph container was not found.",
     "error.cytoscapeNotAvailable": "Failed to load Cytoscape.js.",
-    "error.dependencyMapNoSelection": "Select a node before building a dependency map."
+    "error.dependencyMapNoSelection": "Select a node before building a dependency map.",
+    "error.hostMessageParseReturnedNull": "Failed to parse the host message.",
+    "error.invalidApplyViewStatePayload": "The apply-view-state payload is invalid.",
+    "error.invalidFocusRequest": "The focus request is invalid.",
+    "error.invalidSavedViewState": "The saved view state file is invalid.",
+    "error.invalidSearchQueryPayload": "The search query payload is invalid.",
+    "error.invalidSetLocalePayload": "The locale payload is invalid.",
+    "error.invalidSetThemePayload": "The theme payload is invalid.",
+    "error.stateCyNull": "The graph renderer is not initialized."
   }
 };
 
@@ -537,10 +559,12 @@ const state = {
   mobilePanelHeight: DEFAULT_MOBILE_PANEL_HEIGHT,
   graphPerformanceMode: "normal" as GraphPerformanceMode,
   hasSearchHighlightClasses: false,
+  hasFocusedModeClasses: false,
   pinnedNodes: [] as PinnedNodeViewState[],
   hiddenNodes: [] as HiddenNodeViewState[],
   hiddenNodeIds: new Set<string>(),
-  focusedModePositions: null as Map<string, LocalNodePosition> | null
+  focusedModePositions: null as Map<string, LocalNodePosition> | null,
+  pendingViewportFitPadding: null as number | null
 };
 
 const inspectorEl = document.getElementById("nodeInspector");
@@ -1117,7 +1141,7 @@ function main(): void {
     showCyclesOnlyToggle.checked = state.showCyclesOnly;
     showCyclesOnlyToggle.addEventListener("change", () => {
       state.showCyclesOnly = showCyclesOnlyToggle.checked;
-      rerenderGraphFromState();
+      rerenderGraphFromState(true, true);
     });
   }
 
@@ -1147,7 +1171,7 @@ function main(): void {
     showDocumentsToggle.checked = state.includeDocuments;
     showDocumentsToggle.addEventListener("change", () => {
       state.includeDocuments = showDocumentsToggle.checked;
-      rerenderGraphFromState();
+      rerenderGraphFromState(true, true);
     });
   }
 
@@ -1155,7 +1179,7 @@ function main(): void {
     showProjectsToggle.checked = state.includeProjects;
     showProjectsToggle.addEventListener("change", () => {
       state.includeProjects = showProjectsToggle.checked;
-      rerenderGraphFromState();
+      rerenderGraphFromState(true, true);
     });
   }
 
@@ -1163,7 +1187,7 @@ function main(): void {
     showPackagesToggle.checked = state.includePackages;
     showPackagesToggle.addEventListener("change", () => {
       state.includePackages = showPackagesToggle.checked;
-      rerenderGraphFromState();
+      rerenderGraphFromState(true, true);
     });
   }
 
@@ -1171,7 +1195,7 @@ function main(): void {
     showSymbolsToggle.checked = state.includeSymbols;
     showSymbolsToggle.addEventListener("change", () => {
       state.includeSymbols = showSymbolsToggle.checked;
-      rerenderGraphFromState();
+      rerenderGraphFromState(true, true);
     });
   }
 
@@ -1179,7 +1203,7 @@ function main(): void {
     showAssembliesToggle.checked = state.includeAssemblies;
     showAssembliesToggle.addEventListener("change", () => {
       state.includeAssemblies = showAssembliesToggle.checked;
-      rerenderGraphFromState();
+      rerenderGraphFromState(true, true);
     });
   }
 
@@ -1187,7 +1211,7 @@ function main(): void {
     showNativeDependenciesToggle.checked = state.includeNativeDependencies;
     showNativeDependenciesToggle.addEventListener("change", () => {
       state.includeNativeDependencies = showNativeDependenciesToggle.checked;
-      rerenderGraphFromState();
+      rerenderGraphFromState(true, true);
     });
   }
 
@@ -1195,7 +1219,7 @@ function main(): void {
     showDocumentDependenciesToggle.checked = state.includeDocumentDependencies;
     showDocumentDependenciesToggle.addEventListener("change", () => {
       state.includeDocumentDependencies = showDocumentDependenciesToggle.checked;
-      rerenderGraphFromState();
+      rerenderGraphFromState(true, true);
     });
   }
 
@@ -1203,7 +1227,7 @@ function main(): void {
     showSymbolDependenciesToggle.checked = state.includeSymbolDependencies;
     showSymbolDependenciesToggle.addEventListener("change", () => {
       state.includeSymbolDependencies = showSymbolDependenciesToggle.checked;
-      rerenderGraphFromState();
+      rerenderGraphFromState(true, true);
     });
   }
 
@@ -1335,20 +1359,10 @@ function onHostMessage(event: MessageEvent): void {
     if (!incoming) {
       postHostMessage({
         type: "graph-error",
-        message: "Host message parse returned null"
+        message: t("error.hostMessageParseReturnedNull")
       });
       return;
     }
-
-    postHostMessage({
-      type: "graph-message-received",
-      nodeCount: Array.isArray((incoming.data as { nodes?: unknown[] } | undefined)?.nodes)
-        ? ((incoming.data as { nodes?: unknown[] }).nodes?.length ?? 0)
-        : 0,
-      edgeCount: Array.isArray((incoming.data as { edges?: unknown[] } | undefined)?.edges)
-        ? ((incoming.data as { edges?: unknown[] }).edges?.length ?? 0)
-        : 0
-    });
 
     if (incoming.type === "focus-node") {
       const focusRequest = parseFocusNodeRequest(incoming.data);
@@ -1369,7 +1383,7 @@ function onHostMessage(event: MessageEvent): void {
       if (!viewStateRequest) {
         postHostMessage({
           type: "graph-error",
-          message: "invalid apply-view-state payload"
+          message: t("error.invalidApplyViewStatePayload")
         });
         return;
       }
@@ -1383,7 +1397,7 @@ function onHostMessage(event: MessageEvent): void {
       if (!locale) {
         postHostMessage({
           type: "graph-error",
-          message: "invalid set-locale payload"
+          message: t("error.invalidSetLocalePayload")
         });
         return;
       }
@@ -1397,7 +1411,7 @@ function onHostMessage(event: MessageEvent): void {
       if (!theme) {
         postHostMessage({
           type: "graph-error",
-          message: "invalid set-theme payload"
+          message: t("error.invalidSetThemePayload")
         });
         return;
       }
@@ -1416,7 +1430,7 @@ function onHostMessage(event: MessageEvent): void {
       if (searchQuery === null) {
         postHostMessage({
           type: "graph-error",
-          message: "invalid set-search-query payload"
+          message: t("error.invalidSearchQueryPayload")
         });
         return;
       }
@@ -1447,7 +1461,7 @@ function renderGraph(payload: GraphPayload): void {
     if (!state.cy) {
       postHostMessage({
         type: "graph-error",
-        message: "state.cy is null"
+        message: t("error.stateCyNull")
       });
       return;
     }
@@ -1487,18 +1501,33 @@ function rebuildGraphFromPayload(): void {
   applyGraphVisibilityFromState({ fitViewport: true });
 }
 
-function rerenderGraphFromState(fitViewport = true): void {
-  applyGraphVisibilityFromState({ fitViewport });
+function rerenderGraphFromState(fitViewport = true, relayoutOnExpand = false): void {
+  const previousVisibleNodeIds = relayoutOnExpand
+    ? captureVisibleNodeIds()
+    : null;
+  applyGraphVisibilityFromState({ fitViewport, relayoutOnExpand, previousVisibleNodeIds });
 }
 
-function applyGraphVisibilityFromState(options: { fitViewport: boolean }): void {
+function applyGraphVisibilityFromState(options: {
+  fitViewport: boolean;
+  relayoutOnExpand?: boolean;
+  previousVisibleNodeIds?: ReadonlySet<string> | null;
+}): void {
   if (!state.cy) {
     return;
   }
 
-  applyBaseVisibilityClasses();
+  const visibilityMetrics = applyBaseVisibilityClasses();
 
-  if (options.fitViewport) {
+  const relayoutApplied =
+    options.relayoutOnExpand === true &&
+    !!options.previousVisibleNodeIds &&
+    shouldRelayoutForExpandedVisibility(options.previousVisibleNodeIds, visibilityMetrics.visibleNodeIds);
+  if (relayoutApplied && state.lastPayload) {
+    applyPreferredLayoutForPayload(state.lastPayload);
+  }
+
+  if (options.fitViewport && !relayoutApplied) {
     fitGraphViewport(56);
   }
 
@@ -1512,23 +1541,24 @@ function applyGraphVisibilityFromState(options: { fitViewport: boolean }): void 
 
   applySearchHighlights();
 
+  let effectiveVisibleNodeCount = visibilityMetrics.visibleNodeCount;
+
   if (state.isImpactAnalysisMode) {
     applyImpactAnalysisForSelection();
+    effectiveVisibleNodeCount = state.cy.nodes().not(".state-hidden").not(".filtered-out").length;
   }
   else if (state.isDependencyMapMode) {
     applyDependencyMapForSelection();
+    effectiveVisibleNodeCount = state.cy.nodes().not(".state-hidden").not(".filtered-out").length;
   }
   else {
     clearDependencyMapClasses();
+    applyGraphPerformanceModeFromCurrentVisibility(
+      visibilityMetrics.visibleNodeCount,
+      visibilityMetrics.visibleEdgeCount);
   }
 
-  applyGraphPerformanceModeFromCurrentVisibility();
-  const visibleNodeCount = state.cy
-    .nodes()
-    .not(".state-hidden")
-    .not(".filtered-out")
-    .length;
-  ensureReadableZoom(resolveMinimumReadableZoom(visibleNodeCount));
+  ensureReadableZoom(resolveMinimumReadableZoom(effectiveVisibleNodeCount));
 
   if (state.selectedNodeId) {
     const selected = state.cy.getElementById(state.selectedNodeId);
@@ -1544,16 +1574,76 @@ function applyGraphVisibilityFromState(options: { fitViewport: boolean }): void 
   }
 
   tryApplyPendingFocusRequest();
-  forceGraphRender();
+  if (!relayoutApplied) {
+    forceGraphRender();
+  }
   postGraphRendered();
 }
 
-function applyBaseVisibilityClasses(): void {
+function captureVisibleNodeIds(): Set<string> {
+  const visibleNodeIds = new Set<string>();
   if (!state.cy) {
-    return;
+    return visibleNodeIds;
+  }
+
+  state.cy.nodes().not(".state-hidden").not(".filtered-out").forEach((node: any) => {
+    visibleNodeIds.add(String(node.id()));
+  });
+
+  return visibleNodeIds;
+}
+
+function shouldRelayoutForExpandedVisibility(
+  previousVisibleNodeIds: ReadonlySet<string>,
+  visibleNodeIds: ReadonlySet<string>): boolean
+{
+  if (!state.cy || !state.lastPayload) {
+    return false;
+  }
+
+  let newlyVisibleNodeCount = 0;
+  let hasUnpositionedNode = false;
+
+  for (const nodeId of visibleNodeIds) {
+    if (previousVisibleNodeIds.has(nodeId)) {
+      continue;
+    }
+
+    newlyVisibleNodeCount += 1;
+    const node = state.cy.getElementById(nodeId);
+    if (!hasUnpositionedNode && isNodeMissingStablePosition(node)) {
+      hasUnpositionedNode = true;
+    }
+  }
+
+  if (newlyVisibleNodeCount === 0) {
+    return false;
+  }
+
+  const expansionThreshold = Math.max(
+    12,
+    Math.floor(Math.max(previousVisibleNodeIds.size, visibleNodeIds.size) * 0.18));
+  return hasUnpositionedNode || newlyVisibleNodeCount >= expansionThreshold;
+}
+
+function isNodeMissingStablePosition(node: any): boolean {
+  const position = node.position();
+  const x = Number(position.x);
+  const y = Number(position.y);
+  return !Number.isFinite(x) || !Number.isFinite(y) || (Math.abs(x) <= 1 && Math.abs(y) <= 1);
+}
+
+function applyBaseVisibilityClasses(): VisibilityUpdateMetrics {
+  if (!state.cy) {
+    return {
+      visibleNodeIds: new Set<string>(),
+      visibleNodeCount: 0,
+      visibleEdgeCount: 0
+    };
   }
 
   const visibleNodeIds = new Set<string>();
+  let visibleEdgeCount = 0;
 
   state.cy.startBatch();
   state.cy.nodes().forEach((node: any) => {
@@ -1567,18 +1657,30 @@ function applyBaseVisibilityClasses(): void {
   state.cy.edges().forEach((edge: any) => {
     const isVisible = shouldEdgeBeVisible(edge.data(), visibleNodeIds);
     edge.toggleClass("state-hidden", !isVisible);
+    if (isVisible) {
+      visibleEdgeCount += 1;
+    }
   });
   state.cy.endBatch();
+
+  return {
+    visibleNodeIds,
+    visibleNodeCount: visibleNodeIds.size,
+    visibleEdgeCount
+  };
 }
 
-function applyGraphPerformanceModeFromCurrentVisibility(): void {
+function applyGraphPerformanceModeFromCurrentVisibility(
+  visibleNodeCount?: number,
+  visibleEdgeCount?: number): void
+{
   if (!state.cy) {
     return;
   }
 
-  const visibleNodeCount = state.cy.nodes().not(".state-hidden").not(".filtered-out").length;
-  const visibleEdgeCount = state.cy.edges().not(".state-hidden").not(".filtered-out").length;
-  const nextMode = resolveGraphPerformanceMode(visibleNodeCount, visibleEdgeCount);
+  const nextVisibleNodeCount = visibleNodeCount ?? state.cy.nodes().not(".state-hidden").not(".filtered-out").length;
+  const nextVisibleEdgeCount = visibleEdgeCount ?? state.cy.edges().not(".state-hidden").not(".filtered-out").length;
+  const nextMode = resolveGraphPerformanceMode(nextVisibleNodeCount, nextVisibleEdgeCount);
   if (state.graphPerformanceMode === nextMode) {
     return;
   }
@@ -1624,7 +1726,7 @@ function focusNodeFromHost(request: FocusNodeRequest): void {
 
   if (request.forceVisible && ensureNodeVisibilityForFocus(request.nodeId, request.label)) {
     state.pendingFocusRequest = request;
-    rerenderGraphFromState();
+    rerenderGraphFromState(true, true);
     return;
   }
 
@@ -1969,7 +2071,7 @@ function applyViewStateFromHost(viewState: ViewStateRequest): void {
   }
 
   if (shouldRerender && state.lastPayload) {
-    rerenderGraphFromState();
+    rerenderGraphFromState(true, true);
     return;
   }
 
@@ -2165,7 +2267,7 @@ function renderSymbolTypeFilters(payload: GraphPayload): void {
     input.checked = state.symbolKindVisibility[kind] !== false;
     input.addEventListener("change", () => {
       state.symbolKindVisibility[kind] = input.checked;
-      rerenderGraphFromState();
+      rerenderGraphFromState(true, true);
     });
 
     const text = document.createElement("span");
@@ -2595,8 +2697,17 @@ function clearDependencyMapClasses(updatePerformanceMode = true): void {
     return;
   }
 
+  if (!state.hasFocusedModeClasses) {
+    if (updatePerformanceMode) {
+      applyGraphPerformanceModeFromCurrentVisibility();
+    }
+
+    return;
+  }
+
   state.cy.elements().removeClass("focus-visible");
   state.cy.elements().removeClass("filtered-out");
+  state.hasFocusedModeClasses = false;
   if (updatePerformanceMode) {
     applyGraphPerformanceModeFromCurrentVisibility();
   }
@@ -2654,6 +2765,7 @@ function revealFocusedNeighborhood(neighborhood: any): void {
   }
 
   neighborhood.addClass("focus-visible");
+  state.hasFocusedModeClasses = true;
 }
 
 function pinSelectedNode(): void {
@@ -2857,7 +2969,7 @@ async function importViewStateFromFile(file: File): Promise<void> {
   if (!parsed) {
     postHostMessage({
       type: "graph-error",
-      message: "invalid saved view state"
+      message: t("error.invalidSavedViewState")
     });
     return;
   }
@@ -3824,9 +3936,24 @@ function resizeGraphViewportPreservingTransform(force = false, suppressForceRend
   state.cy.resize();
   state.cy.zoom(zoom);
   state.cy.pan(pan);
-  if (!suppressForceRender) {
+  const fitApplied = applyPendingViewportFitIfNeeded();
+  if (!suppressForceRender || fitApplied) {
     forceGraphRender();
   }
+}
+
+function applyPendingViewportFitIfNeeded(): boolean {
+  if (!state.cy || state.pendingViewportFitPadding === null) {
+    return false;
+  }
+
+  const elements = state.cy.elements().not(".state-hidden").not(".filtered-out");
+  if (elements.length === 0) {
+    state.pendingViewportFitPadding = null;
+    return false;
+  }
+
+  return fitGraphViewportToCollection(elements, state.pendingViewportFitPadding);
 }
 
 function cancelLiveResizePreview(): void {

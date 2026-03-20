@@ -128,7 +128,7 @@ internal static unsafe class LibClangTranslationUnitProbe
 
         if (string.IsNullOrWhiteSpace(sourceFilePath) || !File.Exists(sourceFilePath))
         {
-            message = "source file was not found";
+            message = "source-file-not-found";
             return false;
         }
 
@@ -138,7 +138,7 @@ internal static unsafe class LibClangTranslationUnitProbe
             index = CXIndex.Create();
             if (index.Handle == IntPtr.Zero)
             {
-                message = "clang_createIndex returned null";
+                message = "create-index-failed";
                 return false;
             }
 
@@ -153,8 +153,8 @@ internal static unsafe class LibClangTranslationUnitProbe
             if (errorCode != CXErrorCode.CXError_Success || translationUnit.Handle == IntPtr.Zero)
             {
                 message = errorCode == CXErrorCode.CXError_Success
-                    ? "clang_parseTranslationUnit returned null"
-                    : $"clang_parseTranslationUnit failed: {errorCode}";
+                    ? "parse-translation-unit-null"
+                    : $"parse-translation-unit-failed:{errorCode}";
                 return false;
             }
 
@@ -162,12 +162,14 @@ internal static unsafe class LibClangTranslationUnitProbe
         }
         catch (DllNotFoundException ex)
         {
-            message = ex.Message;
+            _ = ex;
+            message = "dll-not-found";
             return false;
         }
         catch (EntryPointNotFoundException ex)
         {
-            message = ex.Message;
+            _ = ex;
+            message = "entrypoint-not-found";
             return false;
         }
     }

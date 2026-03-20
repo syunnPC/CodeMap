@@ -12,7 +12,9 @@ type LayoutSelectionMetrics = VisibleGraphMetrics & {
 };
 
 function applyPreferredLayoutForPayload(payload: GraphPayload): void {
-  const metrics = collectLayoutSelectionMetrics(payload);
+  const metrics = state.cy
+    ? collectVisibleGraphMetricsFromCy()
+    : collectLayoutSelectionMetrics(payload);
   const preferredLayout = resolvePreferredLayoutName(metrics);
   applyPreferredLayout(preferredLayout, metrics);
 }
@@ -100,13 +102,23 @@ function collectLayoutSelectionMetrics(payload: GraphPayload): LayoutSelectionMe
   };
 }
 
-function fitGraphViewportToCollection(elements: any, padding: number): void {
+function fitGraphViewportToCollection(elements: any, padding: number): boolean {
   if (!state.cy || !elements || elements.length === 0) {
-    return;
+    return false;
   }
 
+  const viewportBounds = graphContainer?.getBoundingClientRect();
+  const viewportWidth = Math.round(viewportBounds?.width ?? state.cy.width());
+  const viewportHeight = Math.round(viewportBounds?.height ?? state.cy.height());
+  if (viewportWidth <= 1 || viewportHeight <= 1) {
+    state.pendingViewportFitPadding = padding;
+    return false;
+  }
+
+  state.pendingViewportFitPadding = null;
   state.cy.resize();
   state.cy.fit(elements, padding);
+  return true;
 }
 
 function resolveMinimumReadableZoom(visibleNodeCount?: number): number {

@@ -102,6 +102,47 @@ public sealed class CppAnalysisService
         return global::CodeMap.AppLocalization.Get(key, args);
     }
 
+    private static string ResolveLibClangFailureMessage(string rawFailureCode)
+    {
+        if (string.IsNullOrWhiteSpace(rawFailureCode))
+        {
+            return "-";
+        }
+
+        if (string.Equals(rawFailureCode, "source-file-not-found", StringComparison.Ordinal))
+        {
+            return T("diag.cpp.libClangFailure.sourceFileNotFound");
+        }
+
+        if (string.Equals(rawFailureCode, "create-index-failed", StringComparison.Ordinal))
+        {
+            return T("diag.cpp.libClangFailure.createIndexFailed");
+        }
+
+        if (string.Equals(rawFailureCode, "parse-translation-unit-null", StringComparison.Ordinal))
+        {
+            return T("diag.cpp.libClangFailure.translationUnitNull");
+        }
+
+        if (string.Equals(rawFailureCode, "dll-not-found", StringComparison.Ordinal))
+        {
+            return T("diag.cpp.libClangFailure.dllNotFound");
+        }
+
+        if (string.Equals(rawFailureCode, "entrypoint-not-found", StringComparison.Ordinal))
+        {
+            return T("diag.cpp.libClangFailure.entryPointNotFound");
+        }
+
+        const string parseFailurePrefix = "parse-translation-unit-failed:";
+        if (rawFailureCode.StartsWith(parseFailurePrefix, StringComparison.Ordinal))
+        {
+            return T("diag.cpp.libClangFailure.translationUnitParseFailed", rawFailureCode[parseFailurePrefix.Length..]);
+        }
+
+        return rawFailureCode;
+    }
+
     public Task<CppSolutionAnalysisResult> AnalyzeAsync(
         string solutionOrProjectPath,
         CancellationToken cancellationToken = default)
@@ -589,7 +630,7 @@ public sealed class CppAnalysisService
             projectName,
             astDrivenDocumentCount,
             regexFallbackDocumentCount,
-            firstAstFailureMessage ?? "-"));
+            ResolveLibClangFailureMessage(firstAstFailureMessage ?? "-")));
 
         List<CppDeclaredSymbol> allDeclaredSymbols = parsedDocuments
             .SelectMany(context => context.DeclaredSymbols)
@@ -785,7 +826,7 @@ public sealed class CppAnalysisService
             out string message);
         diagnostics.Add(parsed
             ? T("diag.cpp.libClangProbeSuccess", projectName, Path.GetFileName(probeFile))
-            : T("diag.cpp.libClangProbeFailed", projectName, Path.GetFileName(probeFile), message));
+            : T("diag.cpp.libClangProbeFailed", projectName, Path.GetFileName(probeFile), ResolveLibClangFailureMessage(message)));
     }
 
     private static IReadOnlyList<string>? ResolveParseArgumentsForFile(

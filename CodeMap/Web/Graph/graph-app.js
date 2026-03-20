@@ -1,5 +1,5 @@
 "use strict";
-const GRAPH_UI_VERSION = "graph-ui-20260313a";
+const GRAPH_UI_VERSION = "graph-ui-20260321a";
 const PANEL_WIDTH_STORAGE_KEY = "codemap.graph.panelWidth";
 const MOBILE_PANEL_HEIGHT_STORAGE_KEY = "codemap.graph.mobilePanelHeight";
 const DEFAULT_PANEL_WIDTH = 320;
@@ -151,7 +151,15 @@ const translations = {
         "splitter.mobileAriaLabel": "グラフと詳細パネルの高さ比率を調整",
         "error.containerNotFound": "グラフ描画領域が見つかりません。",
         "error.cytoscapeNotAvailable": "Cytoscape.js の読み込みに失敗しました。",
-        "error.dependencyMapNoSelection": "依存マップを作成するにはノードを選択してください。"
+        "error.dependencyMapNoSelection": "依存マップを作成するにはノードを選択してください。",
+        "error.hostMessageParseReturnedNull": "ホスト メッセージを解析できませんでした。",
+        "error.invalidApplyViewStatePayload": "表示状態の適用メッセージが不正です。",
+        "error.invalidFocusRequest": "フォーカス要求が不正です。",
+        "error.invalidSavedViewState": "保存された表示状態ファイルが不正です。",
+        "error.invalidSearchQueryPayload": "検索条件メッセージが不正です。",
+        "error.invalidSetLocalePayload": "ロケール設定メッセージが不正です。",
+        "error.invalidSetThemePayload": "テーマ設定メッセージが不正です。",
+        "error.stateCyNull": "グラフ描画エンジンが初期化されていません。"
     },
     en: {
         "page.title": "CodeMap Graph",
@@ -289,7 +297,15 @@ const translations = {
         "splitter.mobileAriaLabel": "Resize graph and detail panel ratio",
         "error.containerNotFound": "Graph container was not found.",
         "error.cytoscapeNotAvailable": "Failed to load Cytoscape.js.",
-        "error.dependencyMapNoSelection": "Select a node before building a dependency map."
+        "error.dependencyMapNoSelection": "Select a node before building a dependency map.",
+        "error.hostMessageParseReturnedNull": "Failed to parse the host message.",
+        "error.invalidApplyViewStatePayload": "The apply-view-state payload is invalid.",
+        "error.invalidFocusRequest": "The focus request is invalid.",
+        "error.invalidSavedViewState": "The saved view state file is invalid.",
+        "error.invalidSearchQueryPayload": "The search query payload is invalid.",
+        "error.invalidSetLocalePayload": "The locale payload is invalid.",
+        "error.invalidSetThemePayload": "The theme payload is invalid.",
+        "error.stateCyNull": "The graph renderer is not initialized."
     }
 };
 const symbolKindNames = {
@@ -361,10 +377,12 @@ const state = {
     mobilePanelHeight: DEFAULT_MOBILE_PANEL_HEIGHT,
     graphPerformanceMode: "normal",
     hasSearchHighlightClasses: false,
+    hasFocusedModeClasses: false,
     pinnedNodes: [],
     hiddenNodes: [],
     hiddenNodeIds: new Set(),
-    focusedModePositions: null
+    focusedModePositions: null,
+    pendingViewportFitPadding: null
 };
 const inspectorEl = document.getElementById("nodeInspector");
 const layoutButton = document.getElementById("layoutButton");
@@ -898,7 +916,7 @@ function main() {
         showCyclesOnlyToggle.checked = state.showCyclesOnly;
         showCyclesOnlyToggle.addEventListener("change", () => {
             state.showCyclesOnly = showCyclesOnlyToggle.checked;
-            rerenderGraphFromState();
+            rerenderGraphFromState(true, true);
         });
     }
     if (dependencyMapDirectionSelect) {
@@ -924,56 +942,56 @@ function main() {
         showDocumentsToggle.checked = state.includeDocuments;
         showDocumentsToggle.addEventListener("change", () => {
             state.includeDocuments = showDocumentsToggle.checked;
-            rerenderGraphFromState();
+            rerenderGraphFromState(true, true);
         });
     }
     if (showProjectsToggle) {
         showProjectsToggle.checked = state.includeProjects;
         showProjectsToggle.addEventListener("change", () => {
             state.includeProjects = showProjectsToggle.checked;
-            rerenderGraphFromState();
+            rerenderGraphFromState(true, true);
         });
     }
     if (showPackagesToggle) {
         showPackagesToggle.checked = state.includePackages;
         showPackagesToggle.addEventListener("change", () => {
             state.includePackages = showPackagesToggle.checked;
-            rerenderGraphFromState();
+            rerenderGraphFromState(true, true);
         });
     }
     if (showSymbolsToggle) {
         showSymbolsToggle.checked = state.includeSymbols;
         showSymbolsToggle.addEventListener("change", () => {
             state.includeSymbols = showSymbolsToggle.checked;
-            rerenderGraphFromState();
+            rerenderGraphFromState(true, true);
         });
     }
     if (showAssembliesToggle) {
         showAssembliesToggle.checked = state.includeAssemblies;
         showAssembliesToggle.addEventListener("change", () => {
             state.includeAssemblies = showAssembliesToggle.checked;
-            rerenderGraphFromState();
+            rerenderGraphFromState(true, true);
         });
     }
     if (showNativeDependenciesToggle) {
         showNativeDependenciesToggle.checked = state.includeNativeDependencies;
         showNativeDependenciesToggle.addEventListener("change", () => {
             state.includeNativeDependencies = showNativeDependenciesToggle.checked;
-            rerenderGraphFromState();
+            rerenderGraphFromState(true, true);
         });
     }
     if (showDocumentDependenciesToggle) {
         showDocumentDependenciesToggle.checked = state.includeDocumentDependencies;
         showDocumentDependenciesToggle.addEventListener("change", () => {
             state.includeDocumentDependencies = showDocumentDependenciesToggle.checked;
-            rerenderGraphFromState();
+            rerenderGraphFromState(true, true);
         });
     }
     if (showSymbolDependenciesToggle) {
         showSymbolDependenciesToggle.checked = state.includeSymbolDependencies;
         showSymbolDependenciesToggle.addEventListener("change", () => {
             state.includeSymbolDependencies = showSymbolDependenciesToggle.checked;
-            rerenderGraphFromState();
+            rerenderGraphFromState(true, true);
         });
     }
     pinSelectedButton?.addEventListener("click", () => {
@@ -1082,19 +1100,10 @@ function onHostMessage(event) {
         if (!incoming) {
             postHostMessage({
                 type: "graph-error",
-                message: "Host message parse returned null"
+                message: t("error.hostMessageParseReturnedNull")
             });
             return;
         }
-        postHostMessage({
-            type: "graph-message-received",
-            nodeCount: Array.isArray(incoming.data?.nodes)
-                ? (incoming.data.nodes?.length ?? 0)
-                : 0,
-            edgeCount: Array.isArray(incoming.data?.edges)
-                ? (incoming.data.edges?.length ?? 0)
-                : 0
-        });
         if (incoming.type === "focus-node") {
             const focusRequest = parseFocusNodeRequest(incoming.data);
             if (!focusRequest) {
@@ -1112,7 +1121,7 @@ function onHostMessage(event) {
             if (!viewStateRequest) {
                 postHostMessage({
                     type: "graph-error",
-                    message: "invalid apply-view-state payload"
+                    message: t("error.invalidApplyViewStatePayload")
                 });
                 return;
             }
@@ -1124,7 +1133,7 @@ function onHostMessage(event) {
             if (!locale) {
                 postHostMessage({
                     type: "graph-error",
-                    message: "invalid set-locale payload"
+                    message: t("error.invalidSetLocalePayload")
                 });
                 return;
             }
@@ -1136,7 +1145,7 @@ function onHostMessage(event) {
             if (!theme) {
                 postHostMessage({
                     type: "graph-error",
-                    message: "invalid set-theme payload"
+                    message: t("error.invalidSetThemePayload")
                 });
                 return;
             }
@@ -1152,7 +1161,7 @@ function onHostMessage(event) {
             if (searchQuery === null) {
                 postHostMessage({
                     type: "graph-error",
-                    message: "invalid set-search-query payload"
+                    message: t("error.invalidSearchQueryPayload")
                 });
                 return;
             }
@@ -1180,7 +1189,7 @@ function renderGraph(payload) {
         if (!state.cy) {
             postHostMessage({
                 type: "graph-error",
-                message: "state.cy is null"
+                message: t("error.stateCyNull")
             });
             return;
         }
@@ -1214,15 +1223,24 @@ function rebuildGraphFromPayload() {
     applyPinnedNodeState(pinnedNodeSnapshot);
     applyGraphVisibilityFromState({ fitViewport: true });
 }
-function rerenderGraphFromState(fitViewport = true) {
-    applyGraphVisibilityFromState({ fitViewport });
+function rerenderGraphFromState(fitViewport = true, relayoutOnExpand = false) {
+    const previousVisibleNodeIds = relayoutOnExpand
+        ? captureVisibleNodeIds()
+        : null;
+    applyGraphVisibilityFromState({ fitViewport, relayoutOnExpand, previousVisibleNodeIds });
 }
 function applyGraphVisibilityFromState(options) {
     if (!state.cy) {
         return;
     }
-    applyBaseVisibilityClasses();
-    if (options.fitViewport) {
+    const visibilityMetrics = applyBaseVisibilityClasses();
+    const relayoutApplied = options.relayoutOnExpand === true &&
+        !!options.previousVisibleNodeIds &&
+        shouldRelayoutForExpandedVisibility(options.previousVisibleNodeIds, visibilityMetrics.visibleNodeIds);
+    if (relayoutApplied && state.lastPayload) {
+        applyPreferredLayoutForPayload(state.lastPayload);
+    }
+    if (options.fitViewport && !relayoutApplied) {
         fitGraphViewport(56);
     }
     if (state.selectedNodeId &&
@@ -1231,22 +1249,20 @@ function applyGraphVisibilityFromState(options) {
         clearSelection(true);
     }
     applySearchHighlights();
+    let effectiveVisibleNodeCount = visibilityMetrics.visibleNodeCount;
     if (state.isImpactAnalysisMode) {
         applyImpactAnalysisForSelection();
+        effectiveVisibleNodeCount = state.cy.nodes().not(".state-hidden").not(".filtered-out").length;
     }
     else if (state.isDependencyMapMode) {
         applyDependencyMapForSelection();
+        effectiveVisibleNodeCount = state.cy.nodes().not(".state-hidden").not(".filtered-out").length;
     }
     else {
         clearDependencyMapClasses();
+        applyGraphPerformanceModeFromCurrentVisibility(visibilityMetrics.visibleNodeCount, visibilityMetrics.visibleEdgeCount);
     }
-    applyGraphPerformanceModeFromCurrentVisibility();
-    const visibleNodeCount = state.cy
-        .nodes()
-        .not(".state-hidden")
-        .not(".filtered-out")
-        .length;
-    ensureReadableZoom(resolveMinimumReadableZoom(visibleNodeCount));
+    ensureReadableZoom(resolveMinimumReadableZoom(effectiveVisibleNodeCount));
     if (state.selectedNodeId) {
         const selected = state.cy.getElementById(state.selectedNodeId);
         if (!selected.empty()) {
@@ -1260,14 +1276,59 @@ function applyGraphVisibilityFromState(options) {
         resetInspector();
     }
     tryApplyPendingFocusRequest();
-    forceGraphRender();
+    if (!relayoutApplied) {
+        forceGraphRender();
+    }
     postGraphRendered();
+}
+function captureVisibleNodeIds() {
+    const visibleNodeIds = new Set();
+    if (!state.cy) {
+        return visibleNodeIds;
+    }
+    state.cy.nodes().not(".state-hidden").not(".filtered-out").forEach((node) => {
+        visibleNodeIds.add(String(node.id()));
+    });
+    return visibleNodeIds;
+}
+function shouldRelayoutForExpandedVisibility(previousVisibleNodeIds, visibleNodeIds) {
+    if (!state.cy || !state.lastPayload) {
+        return false;
+    }
+    let newlyVisibleNodeCount = 0;
+    let hasUnpositionedNode = false;
+    for (const nodeId of visibleNodeIds) {
+        if (previousVisibleNodeIds.has(nodeId)) {
+            continue;
+        }
+        newlyVisibleNodeCount += 1;
+        const node = state.cy.getElementById(nodeId);
+        if (!hasUnpositionedNode && isNodeMissingStablePosition(node)) {
+            hasUnpositionedNode = true;
+        }
+    }
+    if (newlyVisibleNodeCount === 0) {
+        return false;
+    }
+    const expansionThreshold = Math.max(12, Math.floor(Math.max(previousVisibleNodeIds.size, visibleNodeIds.size) * 0.18));
+    return hasUnpositionedNode || newlyVisibleNodeCount >= expansionThreshold;
+}
+function isNodeMissingStablePosition(node) {
+    const position = node.position();
+    const x = Number(position.x);
+    const y = Number(position.y);
+    return !Number.isFinite(x) || !Number.isFinite(y) || (Math.abs(x) <= 1 && Math.abs(y) <= 1);
 }
 function applyBaseVisibilityClasses() {
     if (!state.cy) {
-        return;
+        return {
+            visibleNodeIds: new Set(),
+            visibleNodeCount: 0,
+            visibleEdgeCount: 0
+        };
     }
     const visibleNodeIds = new Set();
+    let visibleEdgeCount = 0;
     state.cy.startBatch();
     state.cy.nodes().forEach((node) => {
         const isVisible = shouldNodeBeVisible(node.data());
@@ -1279,16 +1340,24 @@ function applyBaseVisibilityClasses() {
     state.cy.edges().forEach((edge) => {
         const isVisible = shouldEdgeBeVisible(edge.data(), visibleNodeIds);
         edge.toggleClass("state-hidden", !isVisible);
+        if (isVisible) {
+            visibleEdgeCount += 1;
+        }
     });
     state.cy.endBatch();
+    return {
+        visibleNodeIds,
+        visibleNodeCount: visibleNodeIds.size,
+        visibleEdgeCount
+    };
 }
-function applyGraphPerformanceModeFromCurrentVisibility() {
+function applyGraphPerformanceModeFromCurrentVisibility(visibleNodeCount, visibleEdgeCount) {
     if (!state.cy) {
         return;
     }
-    const visibleNodeCount = state.cy.nodes().not(".state-hidden").not(".filtered-out").length;
-    const visibleEdgeCount = state.cy.edges().not(".state-hidden").not(".filtered-out").length;
-    const nextMode = resolveGraphPerformanceMode(visibleNodeCount, visibleEdgeCount);
+    const nextVisibleNodeCount = visibleNodeCount ?? state.cy.nodes().not(".state-hidden").not(".filtered-out").length;
+    const nextVisibleEdgeCount = visibleEdgeCount ?? state.cy.edges().not(".state-hidden").not(".filtered-out").length;
+    const nextMode = resolveGraphPerformanceMode(nextVisibleNodeCount, nextVisibleEdgeCount);
     if (state.graphPerformanceMode === nextMode) {
         return;
     }
@@ -1322,7 +1391,7 @@ function focusNodeFromHost(request) {
     }
     if (request.forceVisible && ensureNodeVisibilityForFocus(request.nodeId, request.label)) {
         state.pendingFocusRequest = request;
-        rerenderGraphFromState();
+        rerenderGraphFromState(true, true);
         return;
     }
     const node = resolveNodeForFocus(request);
@@ -1592,7 +1661,7 @@ function applyViewStateFromHost(viewState) {
         shouldRerender = true;
     }
     if (shouldRerender && state.lastPayload) {
-        rerenderGraphFromState();
+        rerenderGraphFromState(true, true);
         return;
     }
     if (shouldResizeViewport && state.cy) {
@@ -1735,7 +1804,7 @@ function renderSymbolTypeFilters(payload) {
         input.checked = state.symbolKindVisibility[kind] !== false;
         input.addEventListener("change", () => {
             state.symbolKindVisibility[kind] = input.checked;
-            rerenderGraphFromState();
+            rerenderGraphFromState(true, true);
         });
         const text = document.createElement("span");
         text.textContent = resolveSymbolKindLabel(kind);
@@ -2036,8 +2105,15 @@ function clearDependencyMapClasses(updatePerformanceMode = true) {
     if (!state.cy) {
         return;
     }
+    if (!state.hasFocusedModeClasses) {
+        if (updatePerformanceMode) {
+            applyGraphPerformanceModeFromCurrentVisibility();
+        }
+        return;
+    }
     state.cy.elements().removeClass("focus-visible");
     state.cy.elements().removeClass("filtered-out");
+    state.hasFocusedModeClasses = false;
     if (updatePerformanceMode) {
         applyGraphPerformanceModeFromCurrentVisibility();
     }
@@ -2084,6 +2160,7 @@ function revealFocusedNeighborhood(neighborhood) {
         return;
     }
     neighborhood.addClass("focus-visible");
+    state.hasFocusedModeClasses = true;
 }
 function pinSelectedNode() {
     if (!state.cy || !state.selectedNodeId) {
@@ -2254,7 +2331,7 @@ async function importViewStateFromFile(file) {
     if (!parsed) {
         postHostMessage({
             type: "graph-error",
-            message: "invalid saved view state"
+            message: t("error.invalidSavedViewState")
         });
         return;
     }
@@ -3014,9 +3091,21 @@ function resizeGraphViewportPreservingTransform(force = false, suppressForceRend
     state.cy.resize();
     state.cy.zoom(zoom);
     state.cy.pan(pan);
-    if (!suppressForceRender) {
+    const fitApplied = applyPendingViewportFitIfNeeded();
+    if (!suppressForceRender || fitApplied) {
         forceGraphRender();
     }
+}
+function applyPendingViewportFitIfNeeded() {
+    if (!state.cy || state.pendingViewportFitPadding === null) {
+        return false;
+    }
+    const elements = state.cy.elements().not(".state-hidden").not(".filtered-out");
+    if (elements.length === 0) {
+        state.pendingViewportFitPadding = null;
+        return false;
+    }
+    return fitGraphViewportToCollection(elements, state.pendingViewportFitPadding);
 }
 function cancelLiveResizePreview() {
     if (liveResizePreviewFrame === null) {
@@ -3311,7 +3400,9 @@ function cycleLayoutAndApply() {
     applyLayout(layoutSequence[state.layoutIndex]);
 }
 function applyPreferredLayoutForPayload(payload) {
-    const metrics = collectLayoutSelectionMetrics(payload);
+    const metrics = state.cy
+        ? collectVisibleGraphMetricsFromCy()
+        : collectLayoutSelectionMetrics(payload);
     const preferredLayout = resolvePreferredLayoutName(metrics);
     applyPreferredLayout(preferredLayout, metrics);
 }
@@ -3384,10 +3475,19 @@ function collectLayoutSelectionMetrics(payload) {
 }
 function fitGraphViewportToCollection(elements, padding) {
     if (!state.cy || !elements || elements.length === 0) {
-        return;
+        return false;
     }
+    const viewportBounds = graphContainer?.getBoundingClientRect();
+    const viewportWidth = Math.round(viewportBounds?.width ?? state.cy.width());
+    const viewportHeight = Math.round(viewportBounds?.height ?? state.cy.height());
+    if (viewportWidth <= 1 || viewportHeight <= 1) {
+        state.pendingViewportFitPadding = padding;
+        return false;
+    }
+    state.pendingViewportFitPadding = null;
     state.cy.resize();
     state.cy.fit(elements, padding);
+    return true;
 }
 function resolveMinimumReadableZoom(visibleNodeCount) {
     if (!state.cy) {

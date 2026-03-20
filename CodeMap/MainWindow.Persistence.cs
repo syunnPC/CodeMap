@@ -71,7 +71,7 @@ public sealed partial class MainWindow
         }
         catch (Exception ex)
         {
-            AppendDiagnosticsLine($"表示設定の読み込みに失敗: {ex.Message}");
+            AppendLocalizedDiagnostics("diag.persistence.solutionViewStateLoadFailed", ex.Message);
         }
     }
 
@@ -85,7 +85,7 @@ public sealed partial class MainWindow
             ref _solutionViewStatesSaveCancellationTokenSource,
             s_solutionViewStatesFilePath,
             snapshot,
-            "表示設定の保存に失敗",
+            T("diag.persistence.solutionViewStateSaveFailed"),
             ClearSolutionViewStatesSaveTokenSource);
     }
 
@@ -124,7 +124,7 @@ public sealed partial class MainWindow
         }
         catch (Exception ex)
         {
-            AppendDiagnosticsLine($"最近開いたソリューションの読み込みに失敗: {ex.Message}");
+            AppendLocalizedDiagnostics("diag.persistence.recentWorkspaceLoadFailed", ex.Message);
         }
     }
 
@@ -141,7 +141,7 @@ public sealed partial class MainWindow
             ref _recentSolutionsSaveCancellationTokenSource,
             s_recentSolutionsFilePath,
             snapshot,
-            "最近開いたソリューションの保存に失敗",
+            T("diag.persistence.recentWorkspaceSaveFailed"),
             ClearRecentSolutionsSaveTokenSource);
     }
 
@@ -253,7 +253,7 @@ public sealed partial class MainWindow
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Take(MaxRecentSolutions)
             .ToArray();
-        WriteJsonFileImmediately(s_recentSolutionsFilePath, snapshot, "最近開いたソリューションの保存に失敗");
+        WriteJsonFileImmediately(s_recentSolutionsFilePath, snapshot, T("diag.persistence.recentWorkspaceSaveFailed"));
     }
 
     private void SaveSolutionViewStatesImmediately()
@@ -263,7 +263,7 @@ public sealed partial class MainWindow
             entry => entry.Key,
             entry => NormalizeSolutionViewState(entry.Value),
             StringComparer.OrdinalIgnoreCase);
-        WriteJsonFileImmediately(s_solutionViewStatesFilePath, snapshot, "表示設定の保存に失敗");
+        WriteJsonFileImmediately(s_solutionViewStatesFilePath, snapshot, T("diag.persistence.solutionViewStateSaveFailed"));
     }
 
     private void WriteJsonFileImmediately<T>(string filePath, T value, string failureMessage)

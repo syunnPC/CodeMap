@@ -15,7 +15,7 @@ public sealed class LibClangTranslationUnitProbeTests
             out string message);
 
         Assert.False(result);
-        Assert.Equal("source file was not found", message);
+        Assert.Equal("source-file-not-found", message);
     }
 
     [Fact]
@@ -29,7 +29,7 @@ public sealed class LibClangTranslationUnitProbeTests
             out string message);
 
         Assert.False(result);
-        Assert.Equal("source file was not found", message);
+        Assert.Equal("source-file-not-found", message);
         Assert.Empty(analysisResult.Symbols);
         Assert.Empty(analysisResult.References);
     }
